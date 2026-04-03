@@ -4,7 +4,9 @@ const cors = require('cors');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
 
-dotenv.config();
+// Load environment variables, checking for .env.local first (for development)
+const envFile = process.env.NODE_ENV === 'production' ? '.env' : '.env.local';
+dotenv.config({ path: path.join(__dirname, '..', envFile) });
 
 const authRoutes = require('./routes/auth');
 const analyzeRoutes = require('./routes/analyze');
