@@ -466,6 +466,11 @@ function wireReportPage() {
 
   if (!titleNode || !bodyNode) return;
 
+  if (!getToken()) {
+    window.location.href = 'login.html?next=report.html';
+    return;
+  }
+
   requestJSON(`${API_BASE}/analyze/reports`)
     .then((data) => {
       if (!id) {
