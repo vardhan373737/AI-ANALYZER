@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Dashboard for AI Cyber Analyzer showing session status, saved reports, and analysis coverage." />
+  <meta name="theme-color" content="#08111f" />
+  <title>Dashboard | AI Cyber Analyzer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="container nav">
+      <a class="brand" href="index.html"><span class="brand-mark">A</span>AI Cyber Analyzer</a>
+      <div class="nav-links">
+        <a href="analyzer.html">Analyzer</a>
+        <a href="report.html">Reports</a>
+        <button data-logout>Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container page-shell">
+    <section class="section-head">
+      <div>
+        <span class="kicker">Operations dashboard</span>
+        <h1 class="page-title">Welcome, <span data-user-name>Analyst</span></h1>
+        <p class="page-subtitle">Your current role is <span data-user-role>analyst</span>. Review saved reports or start a new analysis from here.</p>
+      </div>
+      <a class="btn btn-primary" href="analyzer.html">New analysis</a>
+    </section>
+
+    <section class="dashboard-grid">
+      <div class="card">
+        <h3>Session</h3>
+        <div class="metric"><strong data-token-state>Unknown</strong></div>
+        <p class="muted">JWT-secured session state for protected actions and saved reports.</p>
+      </div>
+      <div class="card">
+        <h3>Response time</h3>
+        <div class="metric"><strong>&lt; 3s</strong></div>
+        <p class="muted">Fast threat triage for suspicious text, URLs, and uploaded files.</p>
+      </div>
+      <div class="card">
+        <h3>Coverage</h3>
+        <div class="metric"><strong>Text + URL</strong></div>
+        <p class="muted">Built to grow with file uploads, AI scoring, and future automation.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Reports</h2>
+          <p class="muted">Latest server-saved analysis results.</p>
+        </div>
+      </div>
+      <div class="list" data-report-list>
+        <div class="list-item">Loading reports...</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

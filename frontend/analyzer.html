@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Analyze suspicious text, phishing URLs, and uploaded files with AI Cyber Analyzer." />
+  <meta name="theme-color" content="#08111f" />
+  <title>Analyzer | AI Cyber Analyzer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="analyzer-page">
+  <div class="topbar">
+    <div class="container nav">
+      <a class="brand" href="index.html"><span class="brand-mark">A</span>AI Cyber Analyzer</a>
+      <div class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="report.html">Reports</a>
+        <button data-logout>Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container page-shell">
+    <section class="section-head">
+      <div>
+        <span class="kicker">Threat triage</span>
+        <h1 class="page-title">Analyzer</h1>
+        <p class="page-subtitle">Submit text, scan a URL, or upload a file to generate a server-saved report.</p>
+      </div>
+    </section>
+
+    <section class="split">
+      <div class="card">
+        <form class="form-grid" data-analyzer-form>
+          <label>Analysis title<input type="text" name="title" placeholder="Suspicious email from finance" /></label>
+          <label>Input text<textarea name="text" data-analysis-input placeholder="Paste email content, logs, or suspicious text here..."></textarea></label>
+          <div class="hero-actions">
+            <button class="btn btn-primary" type="submit">Analyze input</button>
+            <button class="btn btn-secondary" type="button" data-sample-text="Urgent: verify your account immediately at https://secure-login.example.com or your access will be suspended.">Load sample text</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Live URL scanning</h2>
+        <form class="form-grid" data-url-scan-form>
+          <label>Scan title<input type="text" name="title" placeholder="URL scan report" /></label>
+          <label>URL<input type="url" name="url" placeholder="https://example.com" /></label>
+          <button class="btn btn-secondary" type="submit">Scan URL</button>
+        </form>
+        <div style="height:18px"></div>
+        <h2>File intake</h2>
+        <form class="form-grid" data-upload-form>
+          <label>Upload sample file<input type="file" name="file" data-file-input accept=".txt,.log,.csv,.eml,.pdf" /></label>
+          <label>File scan title<input type="text" name="title" placeholder="Attachment scan report" /></label>
+          <button class="btn btn-secondary" type="submit">Upload and analyze</button>
+          <p class="muted" data-file-meta>No file selected</p>
+        </form>
+        <p class="muted">Uploads are stored in Supabase Storage when available, then analyzed and saved as reports.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Result</h2>
+          <p class="muted">Server analysis, indicators, and guidance appear here after submission.</p>
+        </div>
+      </div>
+      <div class="result-box" data-analyzer-output>
+        <div class="result-grid">
+          <div><strong>Status:</strong> Ready for analysis</div>
+          <div><strong>Threat Type:</strong> Awaiting input</div>
+          <div><strong>Risk Level:</strong> Awaiting input</div>
+          <div><strong>Explanation:</strong> Submit content to generate a server-side report.</div>
+          <div><strong>Indicators:</strong> None yet</div>
+          <div><strong>Recommendations:</strong> Use the analyzer to save a report in the Reports section.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

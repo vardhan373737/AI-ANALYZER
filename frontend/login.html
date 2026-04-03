@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Login to AI Cyber Analyzer to manage saved reports and run authenticated security scans." />
+  <meta name="theme-color" content="#08111f" />
+  <title>Login | AI Cyber Analyzer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="container nav">
+      <a class="brand" href="index.html"><span class="brand-mark">A</span>AI Cyber Analyzer</a>
+      <div class="nav-links">
+        <a href="register.html">Register</a>
+        <a href="dashboard.html">Dashboard</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="container page-shell split">
+    <section class="card">
+      <span class="kicker">Secure access</span>
+      <h1 class="page-title">Login</h1>
+      <p class="page-subtitle">Use your account to manage reports and run authenticated scans.</p>
+      <form class="form-grid" data-login-form>
+        <label>Email<input type="email" name="email" required placeholder="analyst@example.com" /></label>
+        <label>Password<input type="password" name="password" required placeholder="Your password" /></label>
+        <button class="btn btn-primary" type="submit">Login</button>
+      </form>
+    </section>
+
+    <aside class="card">
+      <h2>Need an account?</h2>
+      <p class="muted">Create an account to unlock the dashboard, reports, and saved analysis history.</p>
+      <a class="btn btn-secondary" href="register.html">Register</a>
+    </aside>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

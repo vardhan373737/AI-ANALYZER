@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="View saved analysis reports, risk scores, and guidance in AI Cyber Analyzer." />
+  <meta name="theme-color" content="#08111f" />
+  <title>Report | AI Cyber Analyzer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="container nav">
+      <a class="brand" href="index.html"><span class="brand-mark">A</span>AI Cyber Analyzer</a>
+      <div class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="analyzer.html">Analyzer</a>
+        <button data-logout>Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container page-shell">
+    <section class="card">
+      <span class="kicker">Stored analysis</span>
+      <h1 class="page-title" data-report-title>Report</h1>
+      <div data-report-body>
+        <p class="muted">Select a report from the dashboard to inspect the full details, recommendations, and metadata.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
