@@ -791,6 +791,7 @@ async function persistReport(client, payload) {
   };
 
   const fullSelect = 'id, user_id, title, summary, findings, recommendations, source_type, source_value, artifact_path, metadata, created_at';
+  const metadataFallbackSelect = 'id, user_id, title, summary, findings, recommendations, metadata, created_at';
   const basicSelect = 'id, user_id, title, summary, findings, recommendations, created_at';
 
   let { data, error } = await client
@@ -800,7 +801,27 @@ async function persistReport(client, payload) {
     .single();
 
   if (error && /schema cache|column/i.test(error.message || '')) {
-    const fallbackInsertPayload = {
+    const metadataFallbackInsertPayload = {
+      user_id: payload.userId,
+      title: payload.title,
+      summary: payload.summary,
+      findings: payload.findings,
+      recommendations: payload.recommendations,
+      metadata: payload.metadata || {}
+    };
+
+    const metadataFallbackResult = await client
+      .from('reports')
+      .insert(metadataFallbackInsertPayload)
+      .select(metadataFallbackSelect)
+      .single();
+
+    data = metadataFallbackResult.data;
+    error = metadataFallbackResult.error;
+  }
+
+  if (error && /schema cache|column/i.test(error.message || '')) {
+    const basicFallbackInsertPayload = {
       user_id: payload.userId,
       title: payload.title,
       summary: payload.summary,
@@ -808,14 +829,14 @@ async function persistReport(client, payload) {
       recommendations: payload.recommendations
     };
 
-    const fallbackResult = await client
+    const basicFallbackResult = await client
       .from('reports')
-      .insert(fallbackInsertPayload)
+      .insert(basicFallbackInsertPayload)
       .select(basicSelect)
       .single();
 
-    data = fallbackResult.data;
-    error = fallbackResult.error;
+    data = basicFallbackResult.data;
+    error = basicFallbackResult.error;
   }
 
   if (error) {
