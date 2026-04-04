@@ -1672,6 +1672,49 @@ function wireMitrePage() {
         history: 'all'
       };
 
+      const deriveMitreFromFindings = (findings) => {
+        const entries = [];
+        const findingList = Array.isArray(findings) ? findings : [];
+
+        findingList.forEach((finding) => {
+          const title = String(finding?.title || '').toLowerCase();
+          const severity = String(finding?.severity || 'low').toLowerCase();
+
+          if (title.includes('weak authentication')) {
+            entries.push({ id: 'T1078', name: 'Valid Accounts', tactic: 'Persistence', severity, confidence: 0.72, score: 18, reasons: ['Derived from weak authentication finding'] });
+            entries.push({ id: 'T1110', name: 'Brute Force', tactic: 'Credential Access', severity, confidence: 0.66, score: 14, reasons: ['Derived from weak authentication finding'] });
+          }
+
+          if (title.includes('injection')) {
+            entries.push({ id: 'T1190', name: 'Exploit Public-Facing Application', tactic: 'Initial Access', severity, confidence: 0.78, score: 20, reasons: ['Derived from injection finding'] });
+            entries.push({ id: 'T1059', name: 'Command and Scripting Interpreter', tactic: 'Execution', severity, confidence: 0.7, score: 16, reasons: ['Derived from injection finding'] });
+          }
+
+          if (title.includes('sensitive data exposure')) {
+            entries.push({ id: 'T1552', name: 'Unsecured Credentials', tactic: 'Credential Access', severity, confidence: 0.8, score: 19, reasons: ['Derived from sensitive data exposure finding'] });
+          }
+
+          if (title.includes('unsafe transport')) {
+            entries.push({ id: 'T1071.001', name: 'Web Protocols', tactic: 'Command and Control', severity, confidence: 0.68, score: 14, reasons: ['Derived from unsafe transport finding'] });
+          }
+
+          if (title.includes('suspicious process')) {
+            entries.push({ id: 'T1059', name: 'Command and Scripting Interpreter', tactic: 'Execution', severity, confidence: 0.74, score: 17, reasons: ['Derived from suspicious process finding'] });
+          }
+        });
+
+        return entries;
+      };
+
+      const getReportTechniques = (report) => {
+        const mapped = Array.isArray(report?.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+        if (mapped.length) {
+          return mapped;
+        }
+
+        return deriveMitreFromFindings(report?.findings);
+      };
+
       const getHistoryCutoff = (historyValue) => {
         const now = Date.now();
         if (historyValue === '7d') return now - (7 * 24 * 60 * 60 * 1000);
@@ -1685,7 +1728,7 @@ function wireMitrePage() {
 
         reports.forEach((report) => {
           const reportCreatedAt = report.createdAt ? new Date(report.createdAt).toISOString() : null;
-          const techniques = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+          const techniques = getReportTechniques(report);
 
           techniques.forEach((technique) => {
             if (!technique?.id) {
@@ -1746,7 +1789,7 @@ function wireMitrePage() {
 
         const tacticSet = new Set();
         reports.forEach((report) => {
-          const techniques = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+          const techniques = getReportTechniques(report);
           techniques.forEach((technique) => {
             tacticSet.add(String(technique?.tactic || 'Unknown'));
           });
