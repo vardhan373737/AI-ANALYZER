@@ -1564,6 +1564,7 @@ function wireReportPage() {
             <button class="inline-link" type="button" data-export-pdf-report-id="${report.id}" data-export-pdf-mode="brief">Download One-Page Brief PDF</button>
             <div class="muted pdf-generated-hint" data-export-pdf-last-full>Executive PDF last generated: never</div>
             <div class="muted pdf-generated-hint" data-export-pdf-last-brief>Brief PDF last generated: never</div>
+            <div class="muted pdf-generated-hint" data-export-pdf-running-time hidden>Generating PDF... 0s elapsed</div>
           </div>
           <div class="list-item">
             <button class="inline-link inline-link-danger" type="button" data-delete-report-id="${report.id}">Delete this report</button>
@@ -1574,8 +1575,32 @@ function wireReportPage() {
       const exportButtons = [...bodyNode.querySelectorAll('[data-export-pdf-report-id]')];
       const fullGeneratedHintNode = bodyNode.querySelector('[data-export-pdf-last-full]');
       const briefGeneratedHintNode = bodyNode.querySelector('[data-export-pdf-last-brief]');
+      const runningTimeHintNode = bodyNode.querySelector('[data-export-pdf-running-time]');
       const pdfGenerationHistory = getPdfGenerationHistory(report.id);
       let isPdfGenerationInProgress = false;
+      let pdfGenerationStartedAt = 0;
+      let pdfGenerationTimer = null;
+
+      const buttonOriginalLabels = new Map(
+        exportButtons.map((button) => [button, button.textContent || 'Download PDF'])
+      );
+
+      const clearPdfGenerationTimer = () => {
+        if (pdfGenerationTimer) {
+          window.clearInterval(pdfGenerationTimer);
+          pdfGenerationTimer = null;
+        }
+      };
+
+      const updateRunningTimeHint = (modeLabel) => {
+        if (!runningTimeHintNode || !pdfGenerationStartedAt) {
+          return;
+        }
+
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - pdfGenerationStartedAt) / 1000));
+        runningTimeHintNode.hidden = false;
+        runningTimeHintNode.textContent = `Generating ${modeLabel}... ${elapsedSeconds}s elapsed`;
+      };
 
       const updatePdfGenerationHints = () => {
         if (fullGeneratedHintNode) {
@@ -1605,12 +1630,16 @@ function wireReportPage() {
           }
 
           isPdfGenerationInProgress = true;
+          pdfGenerationStartedAt = Date.now();
           exportButtons.forEach((button) => {
             button.disabled = true;
           });
 
-          const originalText = exportButton.textContent;
+          const modeLabel = exportMode === 'brief' ? 'Brief PDF' : 'Executive PDF';
           exportButton.textContent = exportMode === 'brief' ? 'Generating Brief...' : 'Generating PDF...';
+          updateRunningTimeHint(modeLabel);
+          clearPdfGenerationTimer();
+          pdfGenerationTimer = window.setInterval(() => updateRunningTimeHint(modeLabel), 1000);
 
           try {
             await downloadExecutiveReportPdf(reportId, exportMode, exportClassification);
@@ -1621,15 +1650,27 @@ function wireReportPage() {
             }
             setPdfGenerationHistory(reportId, pdfGenerationHistory);
             updatePdfGenerationHints();
+            if (runningTimeHintNode) {
+              const totalSeconds = Math.max(0, Math.floor((Date.now() - pdfGenerationStartedAt) / 1000));
+              runningTimeHintNode.hidden = false;
+              runningTimeHintNode.textContent = `${modeLabel} generated in ${totalSeconds}s`;
+            }
             showToast(exportMode === 'brief' ? 'Leadership brief downloaded' : 'Executive PDF downloaded');
           } catch (error) {
+            if (runningTimeHintNode) {
+              const totalSeconds = Math.max(0, Math.floor((Date.now() - pdfGenerationStartedAt) / 1000));
+              runningTimeHintNode.hidden = false;
+              runningTimeHintNode.textContent = `Generation failed after ${totalSeconds}s. Try again.`;
+            }
             showToast(error.message);
           } finally {
             isPdfGenerationInProgress = false;
+            clearPdfGenerationTimer();
+            pdfGenerationStartedAt = 0;
             exportButtons.forEach((button) => {
               button.disabled = false;
+              button.textContent = buttonOriginalLabels.get(button) || button.textContent;
             });
-            exportButton.textContent = originalText;
           }
         });
       });
