@@ -388,12 +388,12 @@ function clampNumber(value, min, max) {
 
 function buildRiskEngine({ baseline = 0, factors = [] }) {
   const normalizedFactors = (factors || [])
-    .filter((factor) => Number(factor?.hits || 0) > 0)
+    .filter((factor) => Number(factor?.hits ?? factor?.count ?? 0) > 0)
     .map((factor) => ({
       id: factor.id,
       label: factor.label,
       severity: factor.severity,
-      hits: Number(factor.hits || 0),
+      hits: Number(factor.hits ?? factor.count ?? 0),
       weight: Number(factor.weight || 0),
       contribution: Number(factor.contribution || 0)
     }))
