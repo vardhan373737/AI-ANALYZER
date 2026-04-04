@@ -1053,6 +1053,8 @@ function drawWatermark(doc, text) {
     return;
   }
 
+  const previousY = doc.y;
+
   const centerX = doc.page.width / 2;
   const centerY = doc.page.height / 2;
 
@@ -1064,9 +1066,11 @@ function drawWatermark(doc, text) {
     align: 'center'
   });
   doc.restore();
+  doc.y = previousY;
 }
 
 function drawFooter(doc, context = {}) {
+  const previousY = doc.y;
   const generatedAt = context.generatedAt || new Date().toLocaleString();
   const leftText = [
     context.organizationName || 'AI Cyber Analyzer',
@@ -1096,6 +1100,8 @@ function drawFooter(doc, context = {}) {
       width: 220,
       align: 'right'
     });
+
+  doc.y = previousY;
 }
 
 function renderFullReportCoverPage(doc, payload) {
