@@ -269,6 +269,16 @@ input[type="submit"]:hover {
   border-color: rgba(255, 107, 107, 0.24);
 }
 
+.status-banner {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(57, 217, 138, 0.35);
+  background: rgba(57, 217, 138, 0.12);
+  color: #b8f7d7;
+  font-weight: 600;
+}
+
 .form-grid {
   display: grid;
   gap: 14px;
@@ -334,6 +344,112 @@ select:focus {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
+}
+
+.report-filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.report-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 4px 0 16px;
+}
+
+.report-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.report-page-size select {
+  width: auto;
+  min-width: 84px;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+
+.report-page-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.report-loading {
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.report-skeleton-list {
+  display: grid;
+  gap: 12px;
+}
+
+.report-skeleton-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.report-skeleton-line {
+  height: 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 25%, rgba(255, 255, 255, 0.2) 45%, rgba(255, 255, 255, 0.08) 65%);
+  background-size: 220% 100%;
+  animation: report-skeleton-shimmer 1.25s ease-in-out infinite;
+}
+
+.report-skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.report-skeleton-line.is-title {
+  width: 62%;
+  height: 16px;
+}
+
+.report-skeleton-line.is-meta {
+  width: 88%;
+}
+
+.report-skeleton-line.is-short {
+  width: 46%;
+}
+
+@keyframes report-skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.report-page-button {
+  min-width: 42px;
+  text-align: center;
+}
+
+[data-report-first],
+[data-report-last] {
+  min-width: 64px;
+}
+
+.report-page-button.is-active {
+  border-color: rgba(78, 161, 255, 0.58);
+  background: rgba(78, 161, 255, 0.2);
 }
 
 .result-box {
@@ -431,7 +547,8 @@ select:focus {
   .grid-3,
   .feature-grid,
   .dashboard-grid,
-  .split {
+  .split,
+  .report-filters {
     grid-template-columns: 1fr;
   }
 

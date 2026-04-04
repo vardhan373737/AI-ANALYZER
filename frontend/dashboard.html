@@ -16,6 +16,7 @@
       <div class="nav-links">
         <a href="analyzer.html">Analyzer</a>
         <a href="report.html">Reports</a>
+        <a href="mitre.html">MITRE Matrix</a>
         <button data-logout>Logout</button>
       </div>
     </div>
@@ -46,6 +47,48 @@
         <h3>Coverage</h3>
         <div class="metric"><strong>Text + URL</strong></div>
         <p class="muted">Built to grow with file uploads, AI scoring, and future automation.</p>
+      </div>
+      <div class="card">
+        <h3>IOC total</h3>
+        <div class="metric"><strong data-ioc-total>0</strong></div>
+        <p class="muted">Indicators extracted across your saved reports.</p>
+      </div>
+      <div class="card">
+        <h3>High-confidence IOCs</h3>
+        <div class="metric"><strong data-ioc-high-confidence>0</strong></div>
+        <p class="muted">Indicators tagged as high-confidence from local enrichment rules.</p>
+      </div>
+      <div class="card">
+        <h3>Top IOC category</h3>
+        <div class="metric"><strong data-ioc-top-category>None</strong></div>
+        <p class="muted">Most frequent indicator type from recent report metadata.</p>
+      </div>
+      <div class="card">
+        <h3>VT malicious hits</h3>
+        <div class="metric"><strong data-vt-malicious-hits>0</strong></div>
+        <p class="muted">Indicators marked malicious by VirusTotal across fetched reports.</p>
+      </div>
+      <div class="card">
+        <h3>AbuseIPDB malicious hits</h3>
+        <div class="metric"><strong data-abuseipdb-malicious-hits>0</strong></div>
+        <p class="muted">IP indicators with malicious verdicts from AbuseIPDB.</p>
+      </div>
+      <div class="card">
+        <h3>External malicious matches</h3>
+        <div class="metric"><strong data-external-malicious-total>0</strong></div>
+        <p class="muted">Total malicious matches across enabled external intel providers.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Top indicators</h2>
+          <p class="muted">Most repeated IOCs found in your latest saved analyses.</p>
+        </div>
+      </div>
+      <div class="list" data-ioc-top-list>
+        <div class="list-item">No IOC data yet. Run an analysis to populate this section.</div>
       </div>
     </section>
 

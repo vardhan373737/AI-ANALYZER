@@ -16,6 +16,7 @@
       <div class="nav-links">
         <a href="dashboard.html">Dashboard</a>
         <a href="analyzer.html">Analyzer</a>
+        <a href="mitre.html">MITRE Matrix</a>
         <button data-logout>Logout</button>
       </div>
     </div>
@@ -25,6 +26,48 @@
     <section class="card">
       <span class="kicker">Stored analysis</span>
       <h1 class="page-title" data-report-title>Report</h1>
+      <div class="report-filters" data-report-filters hidden>
+        <label>
+          Search
+          <input type="search" data-report-search placeholder="Search title, source, summary, MITRE id..." />
+        </label>
+        <label>
+          IOC type
+          <select data-report-ioc-filter>
+            <option value="all">All IOC types</option>
+            <option value="urls">Has URLs</option>
+            <option value="ips">Has IPs</option>
+            <option value="domains">Has domains</option>
+            <option value="hashes">Has hashes</option>
+          </select>
+        </label>
+        <label>
+          Risk
+          <select data-report-risk-filter>
+            <option value="all">All risks</option>
+            <option value="high">High</option>
+            <option value="moderate">Moderate</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+      </div>
+      <div class="report-pagination" data-report-pagination hidden>
+        <label class="report-page-size">
+          Page size
+          <select data-report-page-size>
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+        </label>
+        <button class="inline-link" type="button" data-report-first>First</button>
+        <button class="inline-link" type="button" data-report-prev>Previous</button>
+        <div class="report-page-buttons" data-report-page-buttons></div>
+        <span class="report-loading" data-report-loading hidden>Loading...</span>
+        <span class="muted" data-report-page-info>Showing 0-0 of 0</span>
+        <button class="inline-link" type="button" data-report-next>Next</button>
+        <button class="inline-link" type="button" data-report-last>Last</button>
+      </div>
       <div data-report-body>
         <p class="muted">Select a report from the dashboard to inspect the full details, recommendations, and metadata.</p>
       </div>
