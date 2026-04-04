@@ -249,19 +249,49 @@ function wireNav() {
   });
 }
 
-function getRiskDisplay(summary) {
-  const summaryText = String(summary || '');
-  const levelMatch = summaryText.match(/Risk\s*level:\s*(High|Moderate|Low)/i);
-  const scoreMatch = summaryText.match(/\((\d+\/100)\)/i);
+function getRiskProfile(reportOrSummary) {
+  if (typeof reportOrSummary === 'object' && reportOrSummary) {
+    const report = reportOrSummary;
+    const metadataRisk = report.metadata?.riskEngine;
+    const inlineRisk = report.riskEngine;
+    const structuredRisk = metadataRisk || inlineRisk;
 
-  const level = levelMatch ? levelMatch[1].toLowerCase() : 'low';
-  const score = scoreMatch ? ` (${scoreMatch[1]})` : '';
+    if (structuredRisk && structuredRisk.level) {
+      const numericScore = Number(structuredRisk.score);
+      return {
+        level: String(structuredRisk.level).toLowerCase(),
+        scoreText: Number.isFinite(numericScore) ? `${Math.round(numericScore)}/100` : null,
+        explanation: structuredRisk.explanation || null,
+        topDrivers: Array.isArray(structuredRisk.topDrivers) ? structuredRisk.topDrivers : []
+      };
+    }
+  }
+
+  const summary = typeof reportOrSummary === 'string'
+    ? reportOrSummary
+    : String(reportOrSummary?.summary || '');
+
+  const levelMatch = summary.match(/Risk\s*level:\s*(High|Moderate|Low)/i);
+  const scoreMatch = summary.match(/\((\d+\/100)\)/i);
+
+  return {
+    level: levelMatch ? levelMatch[1].toLowerCase() : 'low',
+    scoreText: scoreMatch ? scoreMatch[1] : null,
+    explanation: null,
+    topDrivers: []
+  };
+}
+
+function getRiskDisplay(reportOrSummary) {
+  const profile = getRiskProfile(reportOrSummary);
+  const level = profile.level;
+  const score = profile.scoreText ? ` (${profile.scoreText})` : '';
 
   if (level === 'high') {
     return {
       badgeClass: 'danger',
       badgeText: `Danger${score}`,
-      statusText: 'High risk detected. Treat this as potentially malicious.'
+      statusText: profile.explanation || 'High risk detected. Treat this as potentially malicious.'
     };
   }
 
@@ -269,14 +299,14 @@ function getRiskDisplay(summary) {
     return {
       badgeClass: 'warn',
       badgeText: `Needs Review${score}`,
-      statusText: 'Moderate risk. Review carefully before trusting it.'
+      statusText: profile.explanation || 'Moderate risk. Review carefully before trusting it.'
     };
   }
 
   return {
     badgeClass: 'success',
     badgeText: `Safe${score}`,
-    statusText: 'Looks good. No strong malicious indicators were found.'
+    statusText: profile.explanation || 'Looks good. No strong malicious indicators were found.'
   };
 }
 
@@ -299,6 +329,186 @@ function setSubmitBusy(form, isBusy, busyText = 'Processing...') {
 
   submitButton.textContent = submitButton.dataset.originalText || submitButton.textContent;
   submitButton.disabled = false;
+}
+
+async function downloadExecutiveReportPdf(reportId, mode = 'full', classification = 'confidential') {
+  const token = getToken();
+  if (!token) {
+    throw new Error('Session expired. Please login again.');
+  }
+
+  const normalizedMode = String(mode || 'full').toLowerCase() === 'brief' ? 'brief' : 'full';
+  const normalizedClassification = ['confidential', 'internal', 'public'].includes(String(classification || '').toLowerCase())
+    ? String(classification).toLowerCase()
+    : 'confidential';
+  const query = new URLSearchParams({
+    mode: normalizedMode,
+    classification: normalizedClassification
+  });
+  const exportUrl = `${API_BASE}/analyze/reports/${encodeURIComponent(reportId)}/pdf?${query.toString()}`;
+
+  const response = await fetch(exportUrl, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.message || 'Failed to generate executive PDF');
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('Content-Disposition') || '';
+  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  const filename = filenameMatch ? filenameMatch[1] : `executive-report-${reportId}.pdf`;
+
+  const blobUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = blobUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+function getClassificationImpact(classification, watermarkConfig = null) {
+  const normalized = ['confidential', 'internal', 'public'].includes(String(classification || '').toLowerCase())
+    ? String(classification).toLowerCase()
+    : 'confidential';
+
+  const labelByClassification = {
+    confidential: 'CONFIDENTIAL',
+    internal: 'INTERNAL',
+    public: 'PUBLIC'
+  };
+
+  const watermarkSource = String(watermarkConfig?.source || 'classification').toLowerCase();
+  const configuredText = String(watermarkConfig?.text || '').trim();
+
+  let watermarkMessage;
+  if (watermarkSource === 'override') {
+    watermarkMessage = `Watermark uses REPORT_WATERMARK_TEXT override: "${configuredText || 'custom value'}".`;
+  } else if (watermarkSource === 'disabled') {
+    watermarkMessage = 'Watermark is disabled by server setting (REPORT_WATERMARK_TEXT=none).';
+  } else {
+    watermarkMessage = `${labelByClassification[normalized]} watermark is applied from selected classification.`;
+  }
+
+  if (normalized === 'public') {
+    return {
+      heading: 'Public export',
+      watermark: watermarkMessage,
+      footer: 'Footer shows classification as Public with organization and generated-by details.'
+    };
+  }
+
+  if (normalized === 'internal') {
+    return {
+      heading: 'Internal export',
+      watermark: watermarkMessage,
+      footer: 'Footer shows classification as Internal with organization and generated-by details.'
+    };
+  }
+
+  return {
+    heading: 'Confidential export',
+    watermark: watermarkMessage,
+    footer: 'Footer shows classification as Confidential with organization and generated-by details.'
+  };
+}
+
+function getWatermarkModeLabel(source) {
+  const normalizedSource = String(source || '').toLowerCase();
+  if (normalizedSource === 'override') return 'Override';
+  if (normalizedSource === 'disabled') return 'Disabled';
+  return 'Classification';
+}
+
+function getWatermarkBadgeToneClass(source, classification) {
+  const normalizedSource = String(source || '').toLowerCase();
+  const normalizedClassification = String(classification || 'confidential').toLowerCase();
+
+  if (normalizedSource === 'override') {
+    return 'is-override';
+  }
+
+  if (normalizedSource === 'disabled') {
+    return 'is-disabled';
+  }
+
+  if (normalizedClassification === 'public') {
+    return 'is-public';
+  }
+
+  if (normalizedClassification === 'internal') {
+    return 'is-internal';
+  }
+
+  return 'is-confidential';
+}
+
+function getCachedPdfConfig() {
+  const raw = localStorage.getItem('aca_pdf_config_cache');
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const expiresAt = Number(parsed?.expiresAt || 0);
+    if (!expiresAt || Date.now() > expiresAt) {
+      localStorage.removeItem('aca_pdf_config_cache');
+      return null;
+    }
+
+    return {
+      value: parsed.value || null,
+      checkedAt: Number(parsed?.checkedAt || 0) || 0
+    };
+  } catch (error) {
+    localStorage.removeItem('aca_pdf_config_cache');
+    return null;
+  }
+}
+
+function setCachedPdfConfig(value, ttlMs = 10 * 60 * 1000) {
+  const now = Date.now();
+  try {
+    localStorage.setItem(
+      'aca_pdf_config_cache',
+      JSON.stringify({
+        value,
+        checkedAt: now,
+        expiresAt: now + ttlMs
+      })
+    );
+  } catch (error) {
+    // Ignore cache write failures (private mode / quota issues).
+  }
+}
+
+function formatElapsedTimeShort(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!value || !Number.isFinite(value)) {
+    return 'never';
+  }
+
+  const deltaMs = Math.max(0, Date.now() - value);
+  const seconds = Math.floor(deltaMs / 1000);
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
 }
 
 function renderPendingReportMessage(output, sourceLabel) {
@@ -324,12 +534,18 @@ function renderSavedReportMessage(output, data) {
   const report = data.report || {};
   const iocIntel = analysis.iocIntel || {};
   const iocCounts = iocIntel.counts || {};
+  const riskProfile = getRiskProfile({
+    riskEngine: analysis.riskEngine,
+    summary: report.summary || analysis.summary || ''
+  });
   const mitreAttack = analysis.mitreAttack || report.metadata?.mitreAttack || [];
+  const topDrivers = riskProfile.topDrivers.length ? riskProfile.topDrivers.join(', ') : 'No primary drivers';
   output.innerHTML = `
     <div class="result-grid">
       <div><strong>Threat Type:</strong> ${analysis.threatType || (analysis.riskLevel === 'High' ? 'Phishing / Scam' : analysis.riskLevel === 'Moderate' ? 'Suspicious' : 'Safe')}</div>
-      <div><strong>Risk Level:</strong> ${analysis.riskLevel || 'Unknown'}${analysis.riskScore !== undefined ? ` (${analysis.riskScore}/100)` : ''}</div>
+      <div><strong>Risk Level:</strong> ${riskProfile.level ? `${riskProfile.level.charAt(0).toUpperCase()}${riskProfile.level.slice(1)}` : (analysis.riskLevel || 'Unknown')}${riskProfile.scoreText ? ` (${riskProfile.scoreText})` : analysis.riskScore !== undefined ? ` (${analysis.riskScore}/100)` : ''}</div>
       <div><strong>Explanation:</strong> ${analysis.explanation || 'Analysis completed on server.'}</div>
+      <div><strong>Top risk drivers:</strong> ${topDrivers}</div>
       <div><strong>Indicators:</strong> ${(analysis.findings || []).map((item) => item.title).join(', ') || 'None found'}</div>
       <div><strong>IOC summary:</strong> ${iocCounts.total || 0} total (${iocCounts.urls || 0} URLs, ${iocCounts.ips || 0} IPs, ${iocCounts.domains || 0} domains, ${iocCounts.hashes || 0} hashes)</div>
       <div><strong>High-confidence IOCs:</strong> ${iocIntel.highConfidenceCount || 0}</div>
@@ -342,14 +558,13 @@ function renderSavedReportMessage(output, data) {
 }
 
 function getReportRiskLevel(report) {
-  const summary = String(report?.summary || '').toLowerCase();
-  if (summary.includes('risk level: high')) {
-    return 'high';
+  const riskLevel = String(report?.metadata?.riskEngine?.level || '').toLowerCase();
+  if (riskLevel === 'high' || riskLevel === 'moderate' || riskLevel === 'low') {
+    return riskLevel;
   }
-  if (summary.includes('risk level: moderate')) {
-    return 'moderate';
-  }
-  return 'low';
+
+  const fallback = getRiskProfile(report?.summary || '').level;
+  return ['high', 'moderate', 'low'].includes(fallback) ? fallback : 'low';
 }
 
 function filterReports(reports, filters) {
@@ -540,7 +755,7 @@ function renderDashboard() {
         reportList.innerHTML = data.reports.length
           ? data.reports
               .map((report) => {
-                const risk = getRiskDisplay(report.summary);
+                const risk = getRiskDisplay(report);
                 return `
                   <div class="list-item">
                     <div class="section-head" style="margin-bottom:8px;">
@@ -956,7 +1171,7 @@ function wireReportPage() {
             <div class="list">
               ${reportsToRender
                 .map((report) => {
-                  const risk = getRiskDisplay(report.summary);
+                  const risk = getRiskDisplay(report);
                   const mitreAttack = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
                   return `
                     <div class="list-item">
@@ -1201,12 +1416,14 @@ function wireReportPage() {
       }
 
       titleNode.textContent = report.title;
-      const risk = getRiskDisplay(report.summary);
+      const risk = getRiskDisplay(report);
       const mitreAttack = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+      const riskProfile = getRiskProfile(report);
       bodyNode.innerHTML = `
         <div class="list">
           <div class="list-item"><strong>Status:</strong> <span class="badge ${risk.badgeClass}">${risk.badgeText}</span> ${risk.statusText}</div>
           <div class="list-item"><strong>Summary:</strong> ${report.summary}</div>
+          <div class="list-item"><strong>Risk drivers:</strong> ${riskProfile.topDrivers.length ? riskProfile.topDrivers.join(', ') : 'No structured risk factors available'}</div>
           <div class="list-item"><strong>Source:</strong> ${report.sourceType || 'text'}${report.sourceValue ? ` · ${report.sourceValue}` : ''}</div>
           <div class="list-item"><strong>Storage:</strong> ${report.artifactPath || 'No artifact stored'}</div>
           <div class="list-item"><strong>Findings:</strong> ${report.findings.map((finding) => `${finding.title} (${finding.severity})`).join(', ') || 'None'}</div>
@@ -1218,10 +1435,182 @@ function wireReportPage() {
           <div class="list-item"><strong>Metadata:</strong> ${report.metadata && Object.keys(report.metadata).length ? JSON.stringify(report.metadata) : 'None'}</div>
           <div class="list-item"><strong>Created:</strong> ${new Date(report.createdAt).toLocaleString()}</div>
           <div class="list-item">
+            <div class="classification-export-controls">
+              <label>
+                Classification for export
+                <select data-export-pdf-classification>
+                  <option value="confidential" selected>Confidential</option>
+                  <option value="internal">Internal</option>
+                  <option value="public">Public</option>
+                </select>
+              </label>
+              <div class="classification-watermark-meta">
+                <div class="classification-watermark-badge" data-watermark-mode-badge>Watermark mode: Loading...</div>
+                <span class="muted classification-watermark-checked" data-watermark-mode-checked>Last checked: --</span>
+              </div>
+              <div class="classification-tooltip-wrap">
+                <button class="inline-link" type="button" data-classification-info-toggle aria-expanded="false" aria-controls="classification-impact-panel">Preview classification impact</button>
+                <div class="classification-tooltip-panel" id="classification-impact-panel" data-classification-info-panel hidden>
+                  <strong data-classification-impact-heading>Confidential export</strong>
+                  <p class="muted" data-classification-impact-watermark>CONFIDENTIAL watermark is applied (or your watermark override).</p>
+                  <p class="muted" data-classification-impact-footer>Footer shows classification as Confidential with organization and generated-by details.</p>
+                  <div class="classification-legend" aria-label="Watermark mode color legend">
+                    <span class="classification-legend-item"><span class="classification-legend-dot is-confidential"></span>Confidential</span>
+                    <span class="classification-legend-item"><span class="classification-legend-dot is-internal"></span>Internal</span>
+                    <span class="classification-legend-item"><span class="classification-legend-dot is-public"></span>Public</span>
+                    <span class="classification-legend-item"><span class="classification-legend-dot is-override"></span>Override</span>
+                    <span class="classification-legend-item"><span class="classification-legend-dot is-disabled"></span>Disabled</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="list-item">
+            <button class="inline-link" type="button" data-export-pdf-report-id="${report.id}" data-export-pdf-mode="full">Download Executive PDF</button>
+            <button class="inline-link" type="button" data-export-pdf-report-id="${report.id}" data-export-pdf-mode="brief">Download One-Page Brief PDF</button>
+          </div>
+          <div class="list-item">
             <button class="inline-link inline-link-danger" type="button" data-delete-report-id="${report.id}">Delete this report</button>
           </div>
         </div>
       `;
+
+      bodyNode.querySelectorAll('[data-export-pdf-report-id]').forEach((exportButton) => {
+        exportButton.addEventListener('click', async () => {
+          const reportId = exportButton.getAttribute('data-export-pdf-report-id');
+          const exportMode = exportButton.getAttribute('data-export-pdf-mode') || 'full';
+          const classificationNode = bodyNode.querySelector('[data-export-pdf-classification]');
+          const exportClassification = classificationNode ? classificationNode.value : 'confidential';
+          if (!reportId) {
+            return;
+          }
+
+          exportButton.disabled = true;
+          const originalText = exportButton.textContent;
+          exportButton.textContent = exportMode === 'brief' ? 'Generating Brief...' : 'Generating PDF...';
+
+          try {
+            await downloadExecutiveReportPdf(reportId, exportMode, exportClassification);
+            showToast(exportMode === 'brief' ? 'Leadership brief downloaded' : 'Executive PDF downloaded');
+          } catch (error) {
+            showToast(error.message);
+          } finally {
+            exportButton.disabled = false;
+            exportButton.textContent = originalText;
+          }
+        });
+      });
+
+      const classificationNode = bodyNode.querySelector('[data-export-pdf-classification]');
+      const tooltipToggleButton = bodyNode.querySelector('[data-classification-info-toggle]');
+      const tooltipPanel = bodyNode.querySelector('[data-classification-info-panel]');
+      const impactHeadingNode = bodyNode.querySelector('[data-classification-impact-heading]');
+      const impactWatermarkNode = bodyNode.querySelector('[data-classification-impact-watermark]');
+      const impactFooterNode = bodyNode.querySelector('[data-classification-impact-footer]');
+      const watermarkModeBadgeNode = bodyNode.querySelector('[data-watermark-mode-badge]');
+      const watermarkModeCheckedNode = bodyNode.querySelector('[data-watermark-mode-checked]');
+      const watermarkConfigState = {
+        source: 'classification',
+        text: null,
+        checkedAt: 0
+      };
+
+      const updateWatermarkModeBadge = () => {
+        if (!watermarkModeBadgeNode) {
+          return;
+        }
+
+        const modeLabel = getWatermarkModeLabel(watermarkConfigState.source);
+        const badgeToneClass = getWatermarkBadgeToneClass(
+          watermarkConfigState.source,
+          classificationNode ? classificationNode.value : 'confidential'
+        );
+
+        watermarkModeBadgeNode.textContent = `Watermark mode: ${modeLabel}`;
+        watermarkModeBadgeNode.classList.remove('is-confidential', 'is-internal', 'is-public', 'is-override', 'is-disabled');
+        watermarkModeBadgeNode.classList.add(badgeToneClass);
+
+        if (watermarkModeCheckedNode) {
+          const elapsedText = formatElapsedTimeShort(watermarkConfigState.checkedAt);
+          watermarkModeCheckedNode.textContent = `Last checked: ${elapsedText}`;
+        }
+      };
+
+      const updateClassificationImpact = () => {
+        const impact = getClassificationImpact(classificationNode ? classificationNode.value : 'confidential', watermarkConfigState);
+        if (impactHeadingNode) impactHeadingNode.textContent = impact.heading;
+        if (impactWatermarkNode) impactWatermarkNode.textContent = impact.watermark;
+        if (impactFooterNode) impactFooterNode.textContent = impact.footer;
+        updateWatermarkModeBadge();
+      };
+
+      if (classificationNode) {
+        classificationNode.addEventListener('change', updateClassificationImpact);
+      }
+
+      const closeImpactTooltip = () => {
+        if (!tooltipPanel || !tooltipToggleButton) {
+          return;
+        }
+
+        tooltipPanel.hidden = true;
+        tooltipToggleButton.setAttribute('aria-expanded', 'false');
+      };
+
+      if (tooltipToggleButton && tooltipPanel) {
+        tooltipToggleButton.addEventListener('click', () => {
+          const shouldOpen = tooltipPanel.hidden;
+          tooltipPanel.hidden = !shouldOpen;
+          tooltipToggleButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+          if (shouldOpen) {
+            updateClassificationImpact();
+          }
+        });
+
+        bodyNode.addEventListener('click', (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+
+          if (!target.closest('[data-classification-info-toggle]') && !target.closest('[data-classification-info-panel]')) {
+            closeImpactTooltip();
+          }
+        });
+
+        window.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            closeImpactTooltip();
+          }
+        });
+      }
+
+      const cachedPdfConfig = getCachedPdfConfig();
+      if (cachedPdfConfig?.value?.watermark) {
+        watermarkConfigState.source = String(cachedPdfConfig.value.watermark.source || 'classification').toLowerCase();
+        watermarkConfigState.text = cachedPdfConfig.value.watermark.text || null;
+        watermarkConfigState.checkedAt = Number(cachedPdfConfig.checkedAt || 0) || Date.now();
+      }
+      updateClassificationImpact();
+
+      if (window.__acaWatermarkCheckedTimer) {
+        window.clearInterval(window.__acaWatermarkCheckedTimer);
+      }
+      window.__acaWatermarkCheckedTimer = window.setInterval(updateWatermarkModeBadge, 1000);
+
+      requestJSON(`${API_BASE}/analyze/pdf-config`)
+        .then((config) => {
+          if (config?.watermark) {
+            watermarkConfigState.source = String(config.watermark.source || 'classification').toLowerCase();
+            watermarkConfigState.text = config.watermark.text || null;
+            watermarkConfigState.checkedAt = Date.now();
+            setCachedPdfConfig(config);
+          }
+          updateClassificationImpact();
+        })
+        .catch(() => {
+          updateClassificationImpact();
+        });
 
       const deleteButton = bodyNode.querySelector('[data-delete-report-id]');
       if (deleteButton) {
@@ -1260,6 +1649,10 @@ function wireReportPage() {
 function wireMitrePage() {
   const matrixNode = document.querySelector('[data-mitre-matrix]');
   const summaryNode = document.querySelector('[data-mitre-summary]');
+  const filtersRoot = document.querySelector('[data-mitre-filters]');
+  const tacticFilterNode = document.querySelector('[data-mitre-tactic-filter]');
+  const severityFilterNode = document.querySelector('[data-mitre-severity-filter]');
+  const historyFilterNode = document.querySelector('[data-mitre-history-filter]');
 
   if (!matrixNode || !summaryNode) {
     return;
@@ -1272,64 +1665,199 @@ function wireMitrePage() {
 
   requestJSON(`${API_BASE}/analyze/reports${buildReportsQueryParams({ limit: 100, offset: 0 })}`)
     .then((data) => {
-      const techniqueMap = new Map();
-      const tacticMap = new Map();
+      const allReports = Array.isArray(data.reports) ? data.reports : [];
+      const state = {
+        tactic: 'all',
+        severity: 'all',
+        history: 'all'
+      };
 
-      (data.reports || []).forEach((report) => {
-        const techniques = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
-        techniques.forEach((technique) => {
-          if (!technique?.id) {
-            return;
-          }
+      const getHistoryCutoff = (historyValue) => {
+        const now = Date.now();
+        if (historyValue === '7d') return now - (7 * 24 * 60 * 60 * 1000);
+        if (historyValue === '30d') return now - (30 * 24 * 60 * 60 * 1000);
+        if (historyValue === '90d') return now - (90 * 24 * 60 * 60 * 1000);
+        return null;
+      };
 
-          const key = technique.id;
-          if (!techniqueMap.has(key)) {
-            techniqueMap.set(key, {
-              ...technique,
-              count: 0
+      const aggregateTechniques = (reports) => {
+        const techniqueMap = new Map();
+
+        reports.forEach((report) => {
+          const reportCreatedAt = report.createdAt ? new Date(report.createdAt).toISOString() : null;
+          const techniques = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+
+          techniques.forEach((technique) => {
+            if (!technique?.id) {
+              return;
+            }
+
+            const key = String(technique.id);
+            if (!techniqueMap.has(key)) {
+              techniqueMap.set(key, {
+                id: technique.id,
+                name: technique.name || 'Unknown technique',
+                tactic: technique.tactic || 'Unknown',
+                severity: String(technique.severity || 'low').toLowerCase(),
+                maxConfidence: Number(technique.confidence || 0),
+                weightedScore: Number(technique.score || 0),
+                count: 0,
+                reasons: [],
+                lastSeen: reportCreatedAt
+              });
+            }
+
+            const entry = techniqueMap.get(key);
+            entry.count += 1;
+            entry.maxConfidence = Math.max(entry.maxConfidence, Number(technique.confidence || 0));
+            entry.weightedScore += Number(technique.score || 0);
+
+            const severityRank = { high: 3, medium: 2, low: 1 };
+            const nextSeverity = String(technique.severity || 'low').toLowerCase();
+            if ((severityRank[nextSeverity] || 1) > (severityRank[entry.severity] || 1)) {
+              entry.severity = nextSeverity;
+            }
+
+            if (reportCreatedAt && (!entry.lastSeen || reportCreatedAt > entry.lastSeen)) {
+              entry.lastSeen = reportCreatedAt;
+            }
+
+            const reasonList = Array.isArray(technique.reasons) ? technique.reasons : [];
+            reasonList.forEach((reason) => {
+              if (reason && !entry.reasons.includes(reason)) {
+                entry.reasons.push(reason);
+              }
             });
+          });
+        });
+
+        return [...techniqueMap.values()].sort((a, b) => {
+          if (b.weightedScore !== a.weightedScore) {
+            return b.weightedScore - a.weightedScore;
+          }
+          return b.count - a.count;
+        });
+      };
+
+      const buildTacticOptions = (reports) => {
+        if (!tacticFilterNode) {
+          return;
+        }
+
+        const tacticSet = new Set();
+        reports.forEach((report) => {
+          const techniques = Array.isArray(report.metadata?.mitreAttack) ? report.metadata.mitreAttack : [];
+          techniques.forEach((technique) => {
+            tacticSet.add(String(technique?.tactic || 'Unknown'));
+          });
+        });
+
+        const sortedTactics = [...tacticSet].filter(Boolean).sort((a, b) => a.localeCompare(b));
+        tacticFilterNode.innerHTML = `
+          <option value="all">All tactics</option>
+          ${sortedTactics.map((tactic) => `<option value="${tactic}">${tactic}</option>`).join('')}
+        `;
+      };
+
+      const filterReportsByHistory = (reports, historyValue) => {
+        const cutoff = getHistoryCutoff(historyValue);
+        if (!cutoff) {
+          return reports;
+        }
+
+        return reports.filter((report) => {
+          const createdAt = report.createdAt ? Date.parse(report.createdAt) : NaN;
+          return Number.isFinite(createdAt) && createdAt >= cutoff;
+        });
+      };
+
+      const render = () => {
+        const reportsInWindow = filterReportsByHistory(allReports, state.history);
+        const techniques = aggregateTechniques(reportsInWindow).filter((technique) => {
+          if (state.tactic !== 'all' && technique.tactic !== state.tactic) {
+            return false;
           }
 
-          const entry = techniqueMap.get(key);
-          entry.count += 1;
+          if (state.severity !== 'all' && technique.severity !== state.severity) {
+            return false;
+          }
 
-          const tactic = technique.tactic || 'Unknown';
-          tacticMap.set(tactic, (tacticMap.get(tactic) || 0) + 1);
+          return true;
         });
-      });
 
-      const techniques = [...techniqueMap.values()].sort((a, b) => b.count - a.count);
-      const tactics = [...tacticMap.entries()].sort((a, b) => b[1] - a[1]);
+        const tacticMap = new Map();
+        techniques.forEach((item) => {
+          tacticMap.set(item.tactic, (tacticMap.get(item.tactic) || 0) + 1);
+        });
 
-      summaryNode.innerHTML = `
-        <div class="dashboard-grid">
-          <div class="card"><h3>Techniques observed</h3><div class="metric"><strong>${techniques.length}</strong></div></div>
-          <div class="card"><h3>Tactics covered</h3><div class="metric"><strong>${tactics.length}</strong></div></div>
-          <div class="card"><h3>Total mappings</h3><div class="metric"><strong>${techniques.reduce((sum, item) => sum + item.count, 0)}</strong></div></div>
-        </div>
-      `;
+        summaryNode.innerHTML = `
+          <div class="dashboard-grid">
+            <div class="card"><h3>Techniques observed</h3><div class="metric"><strong>${techniques.length}</strong></div></div>
+            <div class="card"><h3>Tactics covered</h3><div class="metric"><strong>${tacticMap.size}</strong></div></div>
+            <div class="card"><h3>Weighted confidence</h3><div class="metric"><strong>${Math.round(techniques.reduce((sum, item) => sum + item.maxConfidence, 0) * 100)}</strong><span>%</span></div></div>
+          </div>
+        `;
 
-      if (!techniques.length) {
-        matrixNode.innerHTML = '<div class="list-item">No MITRE mappings yet. Run analyses to populate this matrix.</div>';
-        return;
+        if (!techniques.length) {
+          matrixNode.innerHTML = '<div class="list-item">No MITRE techniques match these filters.</div>';
+          return;
+        }
+
+        matrixNode.innerHTML = `
+          <div class="list">
+            ${techniques
+              .map((technique) => {
+                const severityBadgeClass = technique.severity === 'high'
+                  ? 'danger'
+                  : technique.severity === 'medium'
+                    ? 'warn'
+                    : 'success';
+
+                return `
+                  <div class="list-item">
+                    <div class="section-head" style="margin-bottom:8px;">
+                      <strong>${technique.id} · ${technique.name}</strong>
+                      <span class="badge ${severityBadgeClass}">${technique.severity.toUpperCase()}</span>
+                    </div>
+                    <p class="muted">Tactic: ${technique.tactic}</p>
+                    <p class="muted">Occurrences: ${technique.count} · Weighted score: ${Math.round(technique.weightedScore)} · Max confidence: ${Math.round(technique.maxConfidence * 100)}%</p>
+                    <p class="muted">Last seen: ${technique.lastSeen ? new Date(technique.lastSeen).toLocaleString() : 'Unknown'}</p>
+                    <p class="muted">Reasons: ${technique.reasons.length ? technique.reasons.join('; ') : 'No reasons captured'}</p>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        `;
+      };
+
+      buildTacticOptions(allReports);
+      if (filtersRoot) {
+        filtersRoot.hidden = false;
       }
 
-      matrixNode.innerHTML = `
-        <div class="list">
-          ${techniques
-            .map((technique) => `
-              <div class="list-item">
-                <div class="section-head" style="margin-bottom:8px;">
-                  <strong>${technique.id} · ${technique.name}</strong>
-                  <span class="badge warn">Seen ${technique.count} time${technique.count > 1 ? 's' : ''}</span>
-                </div>
-                <p class="muted">Tactic: ${technique.tactic || 'Unknown'}</p>
-                <p class="muted">Reasons: ${Array.isArray(technique.reasons) && technique.reasons.length ? technique.reasons.join('; ') : 'No reasons captured'}</p>
-              </div>
-            `)
-            .join('')}
-        </div>
-      `;
+      if (tacticFilterNode) {
+        tacticFilterNode.addEventListener('change', () => {
+          state.tactic = tacticFilterNode.value || 'all';
+          render();
+        });
+      }
+
+      if (severityFilterNode) {
+        severityFilterNode.addEventListener('change', () => {
+          state.severity = severityFilterNode.value || 'all';
+          render();
+        });
+      }
+
+      if (historyFilterNode) {
+        historyFilterNode.addEventListener('change', () => {
+          state.history = historyFilterNode.value || 'all';
+          render();
+        });
+      }
+
+      render();
     })
     .catch((error) => {
       summaryNode.innerHTML = '';
