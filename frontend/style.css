@@ -633,6 +633,11 @@ select:focus {
   background: rgba(148, 163, 184, 0.9);
 }
 
+.pdf-generated-hint {
+  margin-top: 6px;
+  font-size: 0.82rem;
+}
+
 .footer {
   padding: 24px 0 40px;
   color: var(--muted);
