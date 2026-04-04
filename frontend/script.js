@@ -511,6 +511,48 @@ function formatElapsedTimeShort(timestamp) {
   return `${hours}h ago`;
 }
 
+function getPdfGenerationHistory(reportId) {
+  const key = `aca_pdf_generated_${String(reportId || '').trim()}`;
+  if (!reportId) {
+    return { full: 0, brief: 0 };
+  }
+
+  const raw = localStorage.getItem(key);
+  if (!raw) {
+    return { full: 0, brief: 0 };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      full: Number(parsed?.full || 0) || 0,
+      brief: Number(parsed?.brief || 0) || 0
+    };
+  } catch (error) {
+    localStorage.removeItem(key);
+    return { full: 0, brief: 0 };
+  }
+}
+
+function setPdfGenerationHistory(reportId, history) {
+  const key = `aca_pdf_generated_${String(reportId || '').trim()}`;
+  if (!reportId) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        full: Number(history?.full || 0) || 0,
+        brief: Number(history?.brief || 0) || 0
+      })
+    );
+  } catch (error) {
+    // Ignore storage write failures.
+  }
+}
+
 function renderPendingReportMessage(output, sourceLabel) {
   if (!output) {
     return;
@@ -1520,6 +1562,8 @@ function wireReportPage() {
           <div class="list-item">
             <button class="inline-link" type="button" data-export-pdf-report-id="${report.id}" data-export-pdf-mode="full">Download Executive PDF</button>
             <button class="inline-link" type="button" data-export-pdf-report-id="${report.id}" data-export-pdf-mode="brief">Download One-Page Brief PDF</button>
+            <div class="muted pdf-generated-hint" data-export-pdf-last-full>Executive PDF last generated: never</div>
+            <div class="muted pdf-generated-hint" data-export-pdf-last-brief>Brief PDF last generated: never</div>
           </div>
           <div class="list-item">
             <button class="inline-link inline-link-danger" type="button" data-delete-report-id="${report.id}">Delete this report</button>
@@ -1527,8 +1571,31 @@ function wireReportPage() {
         </div>
       `;
 
-      bodyNode.querySelectorAll('[data-export-pdf-report-id]').forEach((exportButton) => {
+      const exportButtons = [...bodyNode.querySelectorAll('[data-export-pdf-report-id]')];
+      const fullGeneratedHintNode = bodyNode.querySelector('[data-export-pdf-last-full]');
+      const briefGeneratedHintNode = bodyNode.querySelector('[data-export-pdf-last-brief]');
+      const pdfGenerationHistory = getPdfGenerationHistory(report.id);
+      let isPdfGenerationInProgress = false;
+
+      const updatePdfGenerationHints = () => {
+        if (fullGeneratedHintNode) {
+          fullGeneratedHintNode.textContent = `Executive PDF last generated: ${pdfGenerationHistory.full ? new Date(pdfGenerationHistory.full).toLocaleString() : 'never'}`;
+        }
+
+        if (briefGeneratedHintNode) {
+          briefGeneratedHintNode.textContent = `Brief PDF last generated: ${pdfGenerationHistory.brief ? new Date(pdfGenerationHistory.brief).toLocaleString() : 'never'}`;
+        }
+      };
+
+      updatePdfGenerationHints();
+
+      exportButtons.forEach((exportButton) => {
         exportButton.addEventListener('click', async () => {
+          if (isPdfGenerationInProgress) {
+            showToast('PDF generation is already running. Please wait.');
+            return;
+          }
+
           const reportId = exportButton.getAttribute('data-export-pdf-report-id');
           const exportMode = exportButton.getAttribute('data-export-pdf-mode') || 'full';
           const classificationNode = bodyNode.querySelector('[data-export-pdf-classification]');
@@ -1537,17 +1604,31 @@ function wireReportPage() {
             return;
           }
 
-          exportButton.disabled = true;
+          isPdfGenerationInProgress = true;
+          exportButtons.forEach((button) => {
+            button.disabled = true;
+          });
+
           const originalText = exportButton.textContent;
           exportButton.textContent = exportMode === 'brief' ? 'Generating Brief...' : 'Generating PDF...';
 
           try {
             await downloadExecutiveReportPdf(reportId, exportMode, exportClassification);
+            if (exportMode === 'brief') {
+              pdfGenerationHistory.brief = Date.now();
+            } else {
+              pdfGenerationHistory.full = Date.now();
+            }
+            setPdfGenerationHistory(reportId, pdfGenerationHistory);
+            updatePdfGenerationHints();
             showToast(exportMode === 'brief' ? 'Leadership brief downloaded' : 'Executive PDF downloaded');
           } catch (error) {
             showToast(error.message);
           } finally {
-            exportButton.disabled = false;
+            isPdfGenerationInProgress = false;
+            exportButtons.forEach((button) => {
+              button.disabled = false;
+            });
             exportButton.textContent = originalText;
           }
         });
