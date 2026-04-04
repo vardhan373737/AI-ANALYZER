@@ -700,6 +700,10 @@ function renderDashboard() {
   const nameNode = document.querySelector('[data-user-name]');
   const roleNode = document.querySelector('[data-user-role]');
   const tokenNode = document.querySelector('[data-token-state]');
+  const sourceStatusRoot = document.querySelector('[data-source-status]');
+  const sourceLocalNode = document.querySelector('[data-source-local]');
+  const sourceVtNode = document.querySelector('[data-source-vt]');
+  const sourceAbuseIpdbNode = document.querySelector('[data-source-abuseipdb]');
   const reportList = document.querySelector('[data-report-list]');
   const iocTotalNode = document.querySelector('[data-ioc-total]');
   const iocHighConfidenceNode = document.querySelector('[data-ioc-high-confidence]');
@@ -724,10 +728,53 @@ function renderDashboard() {
   if (roleNode) roleNode.textContent = user.role || 'analyst';
   if (tokenNode) tokenNode.textContent = getToken() ? 'Session active' : 'No session';
 
+  const applySourceChipState = (node, prefix, state) => {
+    if (!node) {
+      return;
+    }
+
+    const normalizedState = String(state || '').toLowerCase();
+    const enabled = normalizedState === 'enabled' || normalizedState === 'active';
+    const label = enabled ? (normalizedState === 'active' ? 'Active' : 'Enabled') : 'Disabled';
+
+    node.classList.remove('is-active', 'is-enabled', 'is-disabled');
+    node.classList.add(enabled ? (normalizedState === 'active' ? 'is-active' : 'is-enabled') : 'is-disabled');
+    node.textContent = `${prefix}: ${label}`;
+  };
+
+  if (sourceStatusRoot) {
+    applySourceChipState(sourceLocalNode, 'Local rules', 'active');
+    applySourceChipState(sourceVtNode, 'VirusTotal', 'disabled');
+    applySourceChipState(sourceAbuseIpdbNode, 'AbuseIPDB', 'disabled');
+  }
+
   if (reportList) {
     requestJSON(`${API_BASE}/analyze/reports${buildReportsQueryParams({ limit: 100, offset: 0 })}`)
       .then((data) => {
         const iocMetrics = aggregateIocMetrics(data.reports || []);
+
+        const externalAvailability = (data.reports || []).reduce(
+          (acc, report) => {
+            const summary = report?.metadata?.iocIntel?.externalSummary || {};
+            if (summary.virusTotalEnabled === true) {
+              acc.virusTotalEnabled = true;
+            }
+            if (summary.abuseIpdbEnabled === true) {
+              acc.abuseIpdbEnabled = true;
+            }
+            return acc;
+          },
+          {
+            virusTotalEnabled: false,
+            abuseIpdbEnabled: false
+          }
+        );
+
+        if (sourceStatusRoot) {
+          applySourceChipState(sourceLocalNode, 'Local rules', 'active');
+          applySourceChipState(sourceVtNode, 'VirusTotal', externalAvailability.virusTotalEnabled ? 'enabled' : 'disabled');
+          applySourceChipState(sourceAbuseIpdbNode, 'AbuseIPDB', externalAvailability.abuseIpdbEnabled ? 'enabled' : 'disabled');
+        }
 
         if (iocTotalNode) iocTotalNode.textContent = String(iocMetrics.totals.total);
         if (iocHighConfidenceNode) iocHighConfidenceNode.textContent = String(iocMetrics.totals.highConfidence);
@@ -806,6 +853,11 @@ function renderDashboard() {
       })
       .catch((error) => {
         reportList.innerHTML = `<div class="list-item">${error.message}</div>`;
+        if (sourceStatusRoot) {
+          applySourceChipState(sourceLocalNode, 'Local rules', 'active');
+          applySourceChipState(sourceVtNode, 'VirusTotal', 'disabled');
+          applySourceChipState(sourceAbuseIpdbNode, 'AbuseIPDB', 'disabled');
+        }
         if (iocTopList) {
           iocTopList.innerHTML = `<div class="list-item">${error.message}</div>`;
         }
