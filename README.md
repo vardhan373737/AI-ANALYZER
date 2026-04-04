@@ -62,6 +62,29 @@ The server serves the frontend from the `frontend/` directory and exposes API ro
 
 Authentication is handled by Supabase Auth. The backend stores a lightweight profile row in `public.users` and uses the Supabase access token for protected requests.
 
+## MITRE Mapping Reference
+
+Use this quick reference when updating mapping logic in the analyzer.
+
+| Detection Signal | MITRE Technique ID | Technique Name | Tactic |
+|---|---|---|---|
+| Weak authentication patterns | T1078 | Valid Accounts | Persistence |
+| Weak authentication patterns | T1110 | Brute Force | Credential Access |
+| Injection payloads (SQL/command/eval) | T1190 | Exploit Public-Facing Application | Initial Access |
+| Injection payloads leading to execution | T1059 | Command and Scripting Interpreter | Execution |
+| Exposed secrets/tokens/credentials | T1552 | Unsecured Credentials | Credential Access |
+| Sensitive cloud object data exposure | T1530 | Data from Cloud Storage Object | Collection |
+| Unsafe transport (insecure HTTP/C2-like web traffic) | T1071.001 | Web Protocols | Command and Control |
+| Possible exfiltration over attacker channel | T1041 | Exfiltration Over C2 Channel | Exfiltration |
+| Suspicious process keywords (powershell/cmd/rundll32) | T1059 | Command and Scripting Interpreter | Execution |
+| User-triggered suspicious execution path | T1204 | User Execution | Execution |
+| Credential-lure URL patterns | T1566.002 | Spearphishing Link | Initial Access |
+| URL shortener abuse | T1566.002 | Spearphishing Link | Initial Access |
+| Suspicious TLD/domain infrastructure | T1583.001 | Acquire Infrastructure: Domains | Resource Development |
+| Known malicious external intel hit | T1583 | Acquire Infrastructure | Resource Development |
+| Public IP indicators with probing behavior | T1595 | Active Scanning | Reconnaissance |
+| Known suspicious external intel hit | T1598 | Phishing for Information | Reconnaissance |
+
 ## Deploy on Vercel
 
 1. Push the project to GitHub.

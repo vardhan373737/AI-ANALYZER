@@ -30,12 +30,30 @@ async function authMiddleware(req, res, next) {
     return res.status(500).json({ message: profileError.message });
   }
 
-  req.user = profile || {
-    id: userData.user.id,
-    name: userData.user.user_metadata?.name || userData.user.email,
-    email: userData.user.email,
-    role: userData.user.user_metadata?.role || 'analyst'
-  };
+  let resolvedProfile = profile;
+
+  if (!resolvedProfile) {
+    const fallbackProfile = {
+      id: userData.user.id,
+      name: userData.user.user_metadata?.name || userData.user.email,
+      email: userData.user.email,
+      role: userData.user.user_metadata?.role || 'analyst'
+    };
+
+    const { data: upsertedProfile, error: upsertError } = await supabase
+      .from('users')
+      .upsert(fallbackProfile, { onConflict: 'id' })
+      .select('id, name, email, role')
+      .single();
+
+    if (upsertError) {
+      return res.status(500).json({ message: upsertError.message });
+    }
+
+    resolvedProfile = upsertedProfile;
+  }
+
+  req.user = resolvedProfile;
 
   return next();
 }
