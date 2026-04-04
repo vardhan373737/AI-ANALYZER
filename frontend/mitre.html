@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="MITRE ATT&CK coverage matrix view for AI Cyber Analyzer reports." />
+  <meta name="theme-color" content="#08111f" />
+  <title>MITRE Matrix | AI Cyber Analyzer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="container nav">
+      <a class="brand" href="index.html"><span class="brand-mark">A</span>AI Cyber Analyzer</a>
+      <div class="nav-links">
+        <a href="dashboard.html">Dashboard</a>
+        <a href="analyzer.html">Analyzer</a>
+        <a href="report.html">Reports</a>
+        <button data-logout>Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container page-shell">
+    <section class="section-head">
+      <div>
+        <span class="kicker">Threat framework view</span>
+        <h1 class="page-title">MITRE ATT&CK Matrix</h1>
+        <p class="page-subtitle">Techniques mapped from report findings and IOC intelligence signals.</p>
+      </div>
+    </section>
+
+    <section class="section" data-mitre-summary>
+      <div class="list-item">Loading MITRE coverage summary...</div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Techniques</h2>
+          <p class="muted">Observed techniques ranked by frequency across recent reports.</p>
+        </div>
+      </div>
+      <div data-mitre-matrix>
+        <div class="list-item">Loading MITRE matrix...</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
