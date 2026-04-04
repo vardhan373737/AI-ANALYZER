@@ -244,7 +244,7 @@ function wireNav() {
   logoutButtons.forEach((button) => {
     button.addEventListener('click', () => {
       clearSession();
-      window.location.href = 'index.html';
+      window.location.href = '/';
     });
   });
 }

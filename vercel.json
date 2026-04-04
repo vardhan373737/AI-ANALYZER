@@ -4,10 +4,12 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/[...all].js" },
     { "source": "/", "destination": "/frontend/index.html" },
+    { "source": "/index.html", "destination": "/frontend/index.html" },
     { "source": "/login.html", "destination": "/frontend/login.html" },
     { "source": "/register.html", "destination": "/frontend/register.html" },
     { "source": "/dashboard.html", "destination": "/frontend/dashboard.html" },
     { "source": "/analyzer.html", "destination": "/frontend/analyzer.html" },
+    { "source": "/mitre.html", "destination": "/frontend/mitre.html" },
     { "source": "/report.html", "destination": "/frontend/report.html" },
     { "source": "/style.css", "destination": "/frontend/style.css" },
     { "source": "/script.js", "destination": "/frontend/script.js" }
