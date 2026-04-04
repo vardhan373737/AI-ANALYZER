@@ -42,6 +42,32 @@
           <p class="muted">Observed techniques ranked by frequency across recent reports.</p>
         </div>
       </div>
+      <div class="report-filters" data-mitre-filters>
+        <label>
+          Tactic
+          <select data-mitre-tactic-filter>
+            <option value="all">All tactics</option>
+          </select>
+        </label>
+        <label>
+          Severity
+          <select data-mitre-severity-filter>
+            <option value="all">All severities</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label>
+          History window
+          <select data-mitre-history-filter>
+            <option value="all">All time</option>
+            <option value="90d">Last 90 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="7d">Last 7 days</option>
+          </select>
+        </label>
+      </div>
       <div data-mitre-matrix>
         <div class="list-item">Loading MITRE matrix...</div>
       </div>

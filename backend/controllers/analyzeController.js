@@ -1,5 +1,8 @@
 const { createSupabaseServiceClient } = require('../config/supabase');
 const pdfParse = require('pdf-parse');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 const supabase = createSupabaseServiceClient();
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'analysis-artifacts';
@@ -211,60 +214,163 @@ async function enrichIocsWithThreatIntel(iocIntel) {
   };
 }
 
-function mapMitreAttack({ findings = [], iocIntel = { indicators: [] } }) {
+function mapMitreAttack({ findings = [], iocIntel = { indicators: [] }, riskEngine = null }) {
   const mapping = new Map();
+  const normalizedRiskScore = clampNumber(Number(riskEngine?.score || 0), 0, 100);
 
-  const registerTechnique = (id, name, tactic, reason) => {
+  const registerTechnique = (id, name, tactic, reason, options = {}) => {
     if (!mapping.has(id)) {
-      mapping.set(id, { id, name, tactic, reasons: [] });
+      mapping.set(id, {
+        id,
+        name,
+        tactic,
+        reasons: [],
+        evidenceCount: 0,
+        score: 0,
+        confidence: 0,
+        severity: 'low'
+      });
     }
+
     const entry = mapping.get(id);
+
     if (reason && !entry.reasons.includes(reason)) {
       entry.reasons.push(reason);
     }
+
+    const weight = Number(options.weight || 12);
+    const confidence = clampNumber(Number(options.confidence || 0.4), 0, 1);
+    const riskBoost = clampNumber(normalizedRiskScore / 100, 0, 1) * 8;
+    const contribution = weight + riskBoost;
+
+    entry.evidenceCount += 1;
+    entry.score = clampNumber(entry.score + contribution, 0, 100);
+    entry.confidence = Math.max(entry.confidence, confidence);
+
+    const severitySource = entry.score * 0.7 + entry.confidence * 30;
+    entry.severity = severitySource >= 68 ? 'high' : severitySource >= 42 ? 'medium' : 'low';
   };
 
   findings.forEach((finding) => {
     const title = String(finding?.title || '').toLowerCase();
+    const severity = String(finding?.severity || 'low').toLowerCase();
+    const findingConfidence = severity === 'high' ? 0.85 : severity === 'medium' ? 0.72 : 0.55;
 
     if (title.includes('weak authentication')) {
-      registerTechnique('T1078', 'Valid Accounts', 'Defense Evasion / Persistence', 'Weak authentication patterns detected');
+      registerTechnique('T1078', 'Valid Accounts', 'Persistence', 'Weak authentication patterns detected', {
+        weight: 20,
+        confidence: findingConfidence
+      });
+      registerTechnique('T1110', 'Brute Force', 'Credential Access', 'Weak authentication indicators can enable brute-force attempts', {
+        weight: 16,
+        confidence: findingConfidence
+      });
     }
 
     if (title.includes('injection')) {
-      registerTechnique('T1190', 'Exploit Public-Facing Application', 'Initial Access', 'Injection-style patterns were detected');
+      registerTechnique('T1190', 'Exploit Public-Facing Application', 'Initial Access', 'Injection-style patterns were detected', {
+        weight: 24,
+        confidence: findingConfidence
+      });
+      registerTechnique('T1059', 'Command and Scripting Interpreter', 'Execution', 'Injection patterns may lead to command/scripting execution', {
+        weight: 18,
+        confidence: findingConfidence
+      });
     }
 
     if (title.includes('sensitive data exposure')) {
-      registerTechnique('T1552', 'Unsecured Credentials', 'Credential Access', 'Sensitive credential-like strings were found');
+      registerTechnique('T1552', 'Unsecured Credentials', 'Credential Access', 'Sensitive credential-like strings were found', {
+        weight: 22,
+        confidence: findingConfidence
+      });
+      registerTechnique('T1530', 'Data from Cloud Storage Object', 'Collection', 'Sensitive data exposure can include cloud object data leakage', {
+        weight: 14,
+        confidence: findingConfidence
+      });
     }
 
     if (title.includes('unsafe transport')) {
-      registerTechnique('T1071.001', 'Web Protocols', 'Command and Control', 'Potentially unsafe transport references were found');
+      registerTechnique('T1071.001', 'Web Protocols', 'Command and Control', 'Potentially unsafe transport references were found', {
+        weight: 16,
+        confidence: findingConfidence
+      });
+      registerTechnique('T1041', 'Exfiltration Over C2 Channel', 'Exfiltration', 'Unsafe transport can expose traffic to C2-style exfiltration', {
+        weight: 13,
+        confidence: findingConfidence
+      });
     }
 
     if (title.includes('suspicious process')) {
-      registerTechnique('T1059', 'Command and Scripting Interpreter', 'Execution', 'Suspicious scripting/process keywords were detected');
+      registerTechnique('T1059', 'Command and Scripting Interpreter', 'Execution', 'Suspicious scripting/process keywords were detected', {
+        weight: 21,
+        confidence: findingConfidence
+      });
+      registerTechnique('T1204', 'User Execution', 'Execution', 'Suspicious process hints may involve user-triggered execution paths', {
+        weight: 12,
+        confidence: findingConfidence
+      });
     }
   });
 
   (iocIntel.indicators || []).forEach((indicator) => {
     const tags = Array.isArray(indicator?.tags) ? indicator.tags : [];
+    const indicatorConfidence = clampNumber(Number(indicator?.confidence || 0.4), 0, 1);
+
+    if (tags.includes('url-shortener')) {
+      registerTechnique('T1566.002', 'Spearphishing Link', 'Initial Access', 'Shortened URL IOC matched phishing-like behavior', {
+        weight: 20,
+        confidence: Math.max(indicatorConfidence, 0.75)
+      });
+    }
 
     if (tags.includes('credential-lure')) {
-      registerTechnique('T1566.002', 'Spearphishing Link', 'Initial Access', 'Credential lure patterns were seen in links');
+      registerTechnique('T1566.002', 'Spearphishing Link', 'Initial Access', 'Credential lure patterns were seen in links', {
+        weight: 22,
+        confidence: Math.max(indicatorConfidence, 0.8)
+      });
     }
 
     if (tags.includes('insecure-transport')) {
-      registerTechnique('T1071.001', 'Web Protocols', 'Command and Control', 'IOC used insecure web protocol');
+      registerTechnique('T1071.001', 'Web Protocols', 'Command and Control', 'IOC used insecure web protocol', {
+        weight: 14,
+        confidence: indicatorConfidence
+      });
+    }
+
+    if (tags.includes('suspicious-tld')) {
+      registerTechnique('T1583.001', 'Acquire Infrastructure: Domains', 'Resource Development', 'Suspicious TLD associated with indicator', {
+        weight: 17,
+        confidence: Math.max(indicatorConfidence, 0.68)
+      });
+    }
+
+    if (tags.includes('public-ip')) {
+      registerTechnique('T1595', 'Active Scanning', 'Reconnaissance', 'Public IP indicators may relate to scanning or probing activity', {
+        weight: 10,
+        confidence: indicatorConfidence
+      });
     }
 
     if (tags.includes('known-malicious')) {
-      registerTechnique('T1583', 'Acquire Infrastructure', 'Resource Development', 'Indicator matched external malicious intelligence');
+      registerTechnique('T1583', 'Acquire Infrastructure', 'Resource Development', 'Indicator matched external malicious intelligence', {
+        weight: 26,
+        confidence: Math.max(indicatorConfidence, 0.9)
+      });
+      registerTechnique('T1583.001', 'Acquire Infrastructure: Domains', 'Resource Development', 'Known-malicious indicator linked to hostile infrastructure acquisition', {
+        weight: 20,
+        confidence: Math.max(indicatorConfidence, 0.85)
+      });
+    }
+
+    if (tags.includes('known-suspicious')) {
+      registerTechnique('T1598', 'Phishing for Information', 'Reconnaissance', 'Indicator matched suspicious reputation from external intelligence', {
+        weight: 15,
+        confidence: Math.max(indicatorConfidence, 0.7)
+      });
     }
   });
 
-  return [...mapping.values()];
+  return [...mapping.values()].sort((a, b) => b.score - a.score);
 }
 
 function getSupabaseOrFail(res) {
@@ -276,38 +382,147 @@ function getSupabaseOrFail(res) {
   return supabase;
 }
 
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildRiskEngine({ baseline = 0, factors = [] }) {
+  const normalizedFactors = (factors || [])
+    .filter((factor) => Number(factor?.hits || 0) > 0)
+    .map((factor) => ({
+      id: factor.id,
+      label: factor.label,
+      severity: factor.severity,
+      hits: Number(factor.hits || 0),
+      weight: Number(factor.weight || 0),
+      contribution: Number(factor.contribution || 0)
+    }))
+    .sort((a, b) => b.contribution - a.contribution);
+
+  const weightedScore = normalizedFactors.reduce((sum, factor) => sum + factor.contribution, 0);
+  const distinctHighSignals = normalizedFactors.filter((factor) => factor.severity === 'high').length;
+  const threatSpreadBonus = clampNumber(normalizedFactors.length * 3, 0, 15);
+  const highSignalBonus = distinctHighSignals >= 2 ? 8 : distinctHighSignals === 1 ? 4 : 0;
+  const score = clampNumber(Math.round(baseline + weightedScore + threatSpreadBonus + highSignalBonus), 0, 100);
+  const level = score >= 70 ? 'High' : score >= 40 ? 'Moderate' : 'Low';
+
+  const threatType =
+    level === 'High'
+      ? 'Phishing / Malware Risk'
+      : level === 'Moderate'
+        ? 'Suspicious Activity'
+        : 'Likely Safe';
+
+  const explanation =
+    level === 'High'
+      ? 'Multiple high-confidence and high-impact indicators were detected.'
+      : level === 'Moderate'
+        ? 'Some suspicious indicators were detected and should be reviewed before trust.'
+        : 'No strong malicious indicators were detected in the provided input.';
+
+  return {
+    version: '1.0',
+    score,
+    level,
+    threatType,
+    explanation,
+    factors: normalizedFactors,
+    topDrivers: normalizedFactors.slice(0, 3).map((factor) => factor.label)
+  };
+}
+
 function scoreText(text) {
   const lower = text.toLowerCase();
   const rules = [
-    { label: 'Weak authentication patterns', regex: /password|login|credential|otp|mfa/gi, weight: 18 },
-    { label: 'Injection risk', regex: /select\s+\*|union\s+select|eval\(|exec\(|command injection|sql/i, weight: 24 },
-    { label: 'Sensitive data exposure', regex: /apikey|secret|token|private key|credentials?/gi, weight: 20 },
-    { label: 'Unsafe transport or storage', regex: /http:\/\/|plain text|unencrypted|no tls|weak hash/gi, weight: 14 },
-    { label: 'Suspicious process or file activity', regex: /powershell|cmd\.exe|rundll32|vbs|macro|autorun/gi, weight: 16 }
+    {
+      id: 'weak-auth',
+      label: 'Weak authentication patterns',
+      regex: /password|login|credential|otp|mfa/gi,
+      weight: 6,
+      maxContribution: 24,
+      severity: 'medium'
+    },
+    {
+      id: 'injection-risk',
+      label: 'Injection risk',
+      regex: /select\s+\*|union\s+select|eval\(|exec\(|command injection|sql/gi,
+      weight: 9,
+      maxContribution: 30,
+      severity: 'high'
+    },
+    {
+      id: 'sensitive-data',
+      label: 'Sensitive data exposure',
+      regex: /apikey|secret|token|private key|credentials?/gi,
+      weight: 8,
+      maxContribution: 28,
+      severity: 'high'
+    },
+    {
+      id: 'unsafe-transport',
+      label: 'Unsafe transport or storage',
+      regex: /http:\/\/|plain text|unencrypted|no tls|weak hash/gi,
+      weight: 5,
+      maxContribution: 20,
+      severity: 'medium'
+    },
+    {
+      id: 'suspicious-process',
+      label: 'Suspicious process or file activity',
+      regex: /powershell|cmd\.exe|rundll32|vbs|macro|autorun/gi,
+      weight: 6,
+      maxContribution: 24,
+      severity: 'medium'
+    }
   ];
 
-  const findings = rules
+  const scoredFindings = rules
     .map((rule) => {
       const matches = lower.match(rule.regex) || [];
       return matches.length
         ? {
+            id: rule.id,
             title: rule.label,
             count: matches.length,
-            severity: rule.weight >= 20 ? 'high' : rule.weight >= 16 ? 'medium' : 'low'
+            severity: rule.severity,
+            weight: rule.weight,
+            contribution: Math.min(matches.length * rule.weight, rule.maxContribution)
           }
         : null;
     })
     .filter(Boolean);
 
-  const riskScore = Math.min(100, findings.reduce((sum, finding) => sum + (finding.severity === 'high' ? 24 : finding.severity === 'medium' ? 16 : 10), 0));
-  const riskLevel = riskScore >= 65 ? 'High' : riskScore >= 35 ? 'Moderate' : 'Low';
-  const threatType = riskLevel === 'High' ? 'Phishing / Scam' : riskLevel === 'Moderate' ? 'Suspicious' : 'Safe';
-  const explanation =
-    riskLevel === 'High'
-      ? 'Multiple strong malicious indicators were detected in the submitted content.'
-      : riskLevel === 'Moderate'
-        ? 'Some suspicious indicators were found and should be reviewed before trusting the content.'
-        : 'No strong malicious indicators were detected in the submitted content.';
+  const findings = scoredFindings.map((finding) => ({
+    title: finding.title,
+    count: finding.count,
+    severity: finding.severity
+  }));
+
+  const riskEngine = buildRiskEngine({
+    baseline: 8,
+    factors: scoredFindings
+  });
+
+  const riskScore = riskEngine.score;
+  const riskLevel = riskEngine.level;
+  const threatType = riskEngine.threatType;
+  const explanation = riskEngine.explanation;
+
+  const recommendationPool = {
+    'Weak authentication patterns': 'Enforce MFA and remove weak authentication fallback flows.',
+    'Injection risk': 'Apply strict input validation and parameterized query execution.',
+    'Sensitive data exposure': 'Rotate leaked credentials and move secrets to a secure vault.',
+    'Unsafe transport or storage': 'Require TLS in transit and encrypt sensitive data at rest.',
+    'Suspicious process or file activity': 'Isolate affected endpoints and inspect process ancestry in EDR.'
+  };
+
+  const recommendations = riskEngine.topDrivers.length
+    ? riskEngine.topDrivers.map((driver) => recommendationPool[driver]).filter(Boolean)
+    : [];
+
+  if (!recommendations.length) {
+    recommendations.push('No critical remediation needed, continue monitoring and maintain baseline controls.');
+  }
 
   return {
     findings,
@@ -315,11 +530,8 @@ function scoreText(text) {
     riskLevel,
     threatType,
     explanation,
-    recommendations: [
-      'Review exposed secrets and rotate any credential found in the sample.',
-      'Harden authentication, storage, and transport defaults.',
-      'Validate all inputs before execution or persistence.'
-    ]
+    recommendations,
+    riskEngine
   };
 }
 
@@ -481,39 +693,55 @@ function scoreUrl(urlValue) {
   const urlText = `${host}${path}${query}`;
 
   const rules = [
-    { label: 'IP address in host', regex: /(?:\d{1,3}\.){3}\d{1,3}/, weight: 22 },
-    { label: 'Shortened URL service', regex: /bit\.ly|tinyurl|t\.co|ow\.ly|is\.gd|cutt\.ly/, weight: 22 },
-    { label: 'Credential harvesting keywords', regex: /login|verify|secure|update|account|signin|password/, weight: 20 },
-    { label: 'Suspicious TLD', regex: /\.(ru|tk|top|xyz|click|zip|mov)$/, weight: 18 },
-    { label: 'Long or complex path', regex: /\/.{60,}/, weight: 12 }
+    { id: 'host-ip', label: 'IP address in host', regex: /(?:\d{1,3}\.){3}\d{1,3}/, weight: 26, severity: 'high' },
+    { id: 'url-shortener', label: 'Shortened URL service', regex: /bit\.ly|tinyurl|t\.co|ow\.ly|is\.gd|cutt\.ly/, weight: 24, severity: 'high' },
+    { id: 'credential-lure', label: 'Credential harvesting keywords', regex: /login|verify|secure|update|account|signin|password/, weight: 20, severity: 'high' },
+    { id: 'suspicious-tld', label: 'Suspicious TLD', regex: /\.(ru|tk|top|xyz|click|zip|mov)$/, weight: 18, severity: 'medium' },
+    { id: 'long-path', label: 'Long or complex path', regex: /\/.{60,}/, weight: 10, severity: 'low' }
   ];
 
-  const findings = rules
+  const scoredFindings = rules
     .map((rule) => {
       const matched = rule.regex.test(urlText);
       rule.regex.lastIndex = 0;
       return matched
         ? {
+            id: rule.id,
             title: rule.label,
             count: 1,
-            severity: rule.weight >= 20 ? 'high' : rule.weight >= 16 ? 'medium' : 'low'
+            severity: rule.severity,
+            weight: rule.weight,
+            contribution: rule.weight
           }
         : null;
     })
     .filter(Boolean);
 
-  const riskScore = Math.min(100, findings.reduce((sum, finding) => sum + (finding.severity === 'high' ? 24 : finding.severity === 'medium' ? 16 : 8), 0));
-  const riskLevel = riskScore >= 65 ? 'High' : riskScore >= 35 ? 'Moderate' : 'Low';
+  const findings = scoredFindings.map((finding) => ({
+    title: finding.title,
+    count: finding.count,
+    severity: finding.severity
+  }));
+
+  const riskEngine = buildRiskEngine({ baseline: 10, factors: scoredFindings });
+
+  const riskScore = riskEngine.score;
+  const riskLevel = riskEngine.level;
+  const threatType = riskEngine.threatType;
+  const explanation = riskEngine.explanation;
 
   return {
     findings,
     riskScore,
     riskLevel,
+    threatType,
+    explanation,
     recommendations: [
       'Check the domain carefully before opening the link.',
       'Avoid entering credentials if the site is unexpected or newly registered.',
       'Use a safe browser or detonation environment for suspicious URLs.'
-    ]
+    ],
+    riskEngine
   };
 }
 
@@ -659,6 +887,420 @@ function applyReportFilters(queryBuilder, filters, options = {}) {
   return query;
 }
 
+function getRiskProfileFromReport(report) {
+  const level = String(report?.metadata?.riskEngine?.level || '').trim();
+  const score = Number(report?.metadata?.riskEngine?.score);
+
+  if (level) {
+    return {
+      level,
+      score: Number.isFinite(score) ? Math.round(score) : null,
+      explanation: String(report?.metadata?.riskEngine?.explanation || '').trim() || null
+    };
+  }
+
+  const summary = String(report?.summary || '');
+  const levelMatch = summary.match(/Risk\s*level:\s*(High|Moderate|Low)/i);
+  const scoreMatch = summary.match(/\((\d+)\/100\)/i);
+
+  return {
+    level: levelMatch ? levelMatch[1] : 'Unknown',
+    score: scoreMatch ? Number(scoreMatch[1]) : null,
+    explanation: null
+  };
+}
+
+function sanitizeFilename(value) {
+  return String(value || 'report')
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'report';
+}
+
+function writePdfLine(doc, text, options = {}) {
+  const maxY = 760;
+  if (doc.y > maxY) {
+    doc.addPage();
+  }
+
+  doc
+    .font(options.font || 'Helvetica')
+    .fontSize(options.size || 11)
+    .fillColor(options.color || '#1b1f24')
+    .text(String(text || ''), {
+      width: 500,
+      lineGap: options.lineGap || 2
+    });
+}
+
+function writePdfSectionTitle(doc, title) {
+  if (doc.y > 730) {
+    doc.addPage();
+  }
+
+  doc.moveDown(0.7);
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(13)
+    .fillColor('#0d2d54')
+    .text(String(title || ''));
+  doc.moveDown(0.2);
+}
+
+function resolveBrandLogoPath() {
+  const envLogo = String(process.env.REPORT_BRAND_LOGO_PATH || '').trim();
+  const candidatePaths = [
+    envLogo ? path.resolve(__dirname, '../../', envLogo) : null,
+    path.resolve(__dirname, '../../social-preview.png'),
+    path.resolve(__dirname, '../../favicon.svg')
+  ].filter(Boolean);
+
+  return candidatePaths.find((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (error) {
+      return false;
+    }
+  }) || null;
+}
+
+function drawBrandedHeader(doc, reportTitle, mode = 'full') {
+  const brandPrimary = process.env.REPORT_BRAND_PRIMARY || '#0c1f3f';
+  const brandAccent = process.env.REPORT_BRAND_ACCENT || '#24d08d';
+  const brandName = process.env.REPORT_BRAND_NAME || 'AI Cyber Analyzer';
+  const logoPath = resolveBrandLogoPath();
+
+  doc.rect(0, 0, doc.page.width, 96).fill(brandPrimary);
+  doc
+    .rect(0, 92, doc.page.width, 4)
+    .fill(brandAccent);
+
+  if (logoPath && /\.(png|jpg|jpeg)$/i.test(logoPath)) {
+    try {
+      doc.image(logoPath, 50, 22, { fit: [44, 44] });
+    } catch (error) {
+      // Ignore logo draw failures and fall back to text-only header.
+    }
+  }
+
+  doc
+    .fillColor('#ffffff')
+    .font('Helvetica-Bold')
+    .fontSize(14)
+    .text(brandName, 102, 26, { width: 360, ellipsis: true });
+
+  doc
+    .font('Helvetica')
+    .fontSize(10)
+    .fillColor('#cde3ff')
+    .text(mode === 'brief' ? 'Leadership Brief (One Page)' : 'Executive Security Report', 102, 46);
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(16)
+    .fillColor('#0f172a')
+    .text(String(reportTitle || 'Untitled report'), 50, 122, {
+      width: 500,
+      ellipsis: true
+    });
+
+  doc.y = 150;
+}
+
+function deriveOrganizationName(user) {
+  const envOrg = String(process.env.REPORT_ORGANIZATION_NAME || '').trim();
+  if (envOrg) {
+    return envOrg;
+  }
+
+  const email = String(user?.email || '').trim().toLowerCase();
+  if (email.includes('@')) {
+    const domain = email.split('@')[1] || '';
+    const root = domain.split('.')[0] || '';
+    if (root) {
+      return root.charAt(0).toUpperCase() + root.slice(1);
+    }
+  }
+
+  return 'AI Cyber Analyzer';
+}
+
+function drawWatermark(doc, text) {
+  const label = String(text || '').trim();
+  if (!label || label.toLowerCase() === 'none') {
+    return;
+  }
+
+  const centerX = doc.page.width / 2;
+  const centerY = doc.page.height / 2;
+
+  doc.save();
+  doc.rotate(-35, { origin: [centerX, centerY] });
+  doc.fillColor('#94a3b8', 0.14);
+  doc.font('Helvetica-Bold').fontSize(56).text(label.toUpperCase(), 70, centerY - 30, {
+    width: doc.page.width - 140,
+    align: 'center'
+  });
+  doc.restore();
+}
+
+function drawFooter(doc, context = {}) {
+  const generatedAt = context.generatedAt || new Date().toLocaleString();
+  const leftText = [
+    context.organizationName || 'AI Cyber Analyzer',
+    context.generatedBy ? `Generated by ${context.generatedBy}` : null,
+    context.classification ? context.classification : null
+  ].filter(Boolean).join(' | ');
+
+  const rightText = [
+    context.reportId ? `Report ${context.reportId}` : null,
+    generatedAt
+  ].filter(Boolean).join(' | ');
+
+  doc
+    .font('Helvetica')
+    .fontSize(8.5)
+    .fillColor('#64748b')
+    .text(leftText, 50, doc.page.height - 28, {
+      width: 320,
+      align: 'left'
+    });
+
+  doc
+    .font('Helvetica')
+    .fontSize(8.5)
+    .fillColor('#64748b')
+    .text(rightText, doc.page.width - 270, doc.page.height - 28, {
+      width: 220,
+      align: 'right'
+    });
+}
+
+function renderFullReportCoverPage(doc, payload) {
+  const brandPrimary = process.env.REPORT_BRAND_PRIMARY || '#0c1f3f';
+  const brandAccent = process.env.REPORT_BRAND_ACCENT || '#24d08d';
+  const logoPath = resolveBrandLogoPath();
+
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f8fafc');
+  doc.rect(0, 0, doc.page.width, 210).fill(brandPrimary);
+  doc.rect(0, 206, doc.page.width, 4).fill(brandAccent);
+
+  if (logoPath && /\.(png|jpg|jpeg)$/i.test(logoPath)) {
+    try {
+      doc.image(logoPath, 50, 40, { fit: [64, 64] });
+    } catch (error) {
+      // Ignore image rendering failures.
+    }
+  }
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(16)
+    .fillColor('#ffffff')
+    .text(payload.organizationName || 'AI Cyber Analyzer', 126, 56, { width: 360 });
+
+  doc
+    .font('Helvetica')
+    .fontSize(11)
+    .fillColor('#dbeafe')
+    .text('Executive Cybersecurity Report', 126, 82, { width: 360 });
+
+  doc
+    .font('Helvetica-Bold')
+    .fontSize(28)
+    .fillColor('#0f172a')
+    .text(String(payload.title || 'Untitled report'), 50, 280, { width: 500 });
+
+  doc
+    .font('Helvetica')
+    .fontSize(12)
+    .fillColor('#334155')
+    .text(`Risk posture: ${payload.riskLabel}`, 50, 360)
+    .text(`Classification: ${payload.classification}`, 50, 384)
+    .text(`Prepared for: ${payload.organizationName}`, 50, 408)
+    .text(`Generated by: ${payload.generatedBy}`, 50, 432)
+    .text(`Created: ${payload.createdAtLabel}`, 50, 456)
+    .text(`Report ID: ${payload.reportId}`, 50, 480);
+
+  doc
+    .font('Helvetica-Oblique')
+    .fontSize(10)
+    .fillColor('#64748b')
+    .text('This document contains security analysis insights and should be handled according to your organization policy.', 50, 560, {
+      width: 500,
+      lineGap: 3
+    });
+}
+
+function summarizeExecutiveNarrative(mappedReport, risk, topMitre) {
+  const riskLabel = `${risk.level}${Number.isFinite(risk.score) ? ` (${risk.score}/100)` : ''}`;
+  const topTechnique = topMitre[0] ? `${topMitre[0].id} ${topMitre[0].name}` : 'No dominant MITRE technique detected';
+  const topDrivers = Array.isArray(mappedReport.metadata?.riskEngine?.topDrivers)
+    ? mappedReport.metadata.riskEngine.topDrivers.slice(0, 2).join(' and ')
+    : '';
+
+  const driverSummary = topDrivers ? `Primary risk drivers include ${topDrivers}.` : 'No dominant risk drivers were recorded.';
+
+  return `${mappedReport.title || 'This report'} is currently assessed as ${riskLabel}. ${driverSummary} The strongest mapped attacker behavior is ${topTechnique}.`;
+}
+
+function renderBriefOnePage(doc, mappedReport, risk, iocCounts, topMitre) {
+  writePdfSectionTitle(doc, 'Executive Summary');
+  writePdfLine(doc, summarizeExecutiveNarrative(mappedReport, risk, topMitre));
+  writePdfLine(doc, risk.explanation || mappedReport.summary || 'No additional explanation available.');
+
+  writePdfSectionTitle(doc, 'Leadership Snapshot');
+  writePdfLine(doc, `Risk level: ${risk.level}${Number.isFinite(risk.score) ? ` (${risk.score}/100)` : ''}`);
+  writePdfLine(doc, `Indicators: ${Number(iocCounts.total || 0)} total | High-confidence: ${Number(mappedReport.metadata?.iocIntel?.highConfidenceCount || 0)}`);
+  writePdfLine(doc, `Source: ${mappedReport.sourceType}${mappedReport.sourceValue ? ` - ${mappedReport.sourceValue}` : ''}`);
+
+  writePdfSectionTitle(doc, 'Top MITRE Techniques');
+  if (!topMitre.length) {
+    writePdfLine(doc, 'No MITRE techniques were mapped for this report.');
+  } else {
+    topMitre.slice(0, 3).forEach((technique, index) => {
+      writePdfLine(
+        doc,
+        `${index + 1}. ${technique.id || 'Unknown'} - ${technique.name || 'Unknown'} | ${String(technique.severity || 'low').toUpperCase()} | ${Math.round(Number(technique.confidence || 0) * 100)}% confidence`
+      );
+    });
+  }
+
+  writePdfSectionTitle(doc, 'Immediate Actions');
+  const actions = (Array.isArray(mappedReport.recommendations) ? mappedReport.recommendations : []).slice(0, 3);
+  if (!actions.length) {
+    writePdfLine(doc, 'No immediate actions recorded. Continue baseline monitoring.');
+  } else {
+    actions.forEach((item, index) => writePdfLine(doc, `${index + 1}. ${item}`));
+  }
+}
+
+function renderFullExecutiveReport(doc, mappedReport, risk, iocCounts, topMitre) {
+  writePdfSectionTitle(doc, 'Executive Summary');
+  writePdfLine(doc, summarizeExecutiveNarrative(mappedReport, risk, topMitre));
+  writePdfLine(doc, risk.explanation || mappedReport.summary || 'No additional risk explanation available.');
+  writePdfLine(doc, `Created: ${mappedReport.createdAt ? new Date(mappedReport.createdAt).toLocaleString() : 'Unknown'}`);
+
+  writePdfSectionTitle(doc, 'Risk Summary');
+  writePdfLine(doc, `Level: ${risk.level}${Number.isFinite(risk.score) ? ` (${risk.score}/100)` : ''}`, {
+    font: 'Helvetica-Bold',
+    color: '#0f172a'
+  });
+  writePdfLine(doc, `Source: ${mappedReport.sourceType}${mappedReport.sourceValue ? ` - ${mappedReport.sourceValue}` : ''}`);
+
+  writePdfSectionTitle(doc, 'Top MITRE ATT&CK Techniques');
+  if (!topMitre.length) {
+    writePdfLine(doc, 'No MITRE techniques were mapped for this report.');
+  } else {
+    topMitre.forEach((technique, index) => {
+      writePdfLine(
+        doc,
+        `${index + 1}. ${technique.id || 'Unknown'} - ${technique.name || 'Unknown technique'} (${technique.tactic || 'Unknown tactic'})`,
+        { font: 'Helvetica-Bold' }
+      );
+      writePdfLine(
+        doc,
+        `Severity: ${String(technique.severity || 'low').toUpperCase()} | Confidence: ${Math.round(Number(technique.confidence || 0) * 100)}% | Score: ${Math.round(Number(technique.score || 0))}`
+      );
+      if (Array.isArray(technique.reasons) && technique.reasons.length) {
+        writePdfLine(doc, `Reasons: ${technique.reasons.slice(0, 3).join('; ')}`);
+      }
+    });
+  }
+
+  writePdfSectionTitle(doc, 'Technical Appendix');
+  writePdfLine(doc, 'IOC Statistics', { font: 'Helvetica-Bold' });
+  writePdfLine(doc, `Total indicators: ${Number(iocCounts.total || 0)}`);
+  writePdfLine(doc, `URLs: ${Number(iocCounts.urls || 0)} | IPs: ${Number(iocCounts.ips || 0)} | Domains: ${Number(iocCounts.domains || 0)} | Hashes: ${Number(iocCounts.hashes || 0)}`);
+  writePdfLine(doc, `High-confidence indicators: ${Number(mappedReport.metadata?.iocIntel?.highConfidenceCount || 0)}`);
+
+  writePdfLine(doc, 'Recommendations', { font: 'Helvetica-Bold' });
+  if (!mappedReport.recommendations.length) {
+    writePdfLine(doc, 'No recommendations were provided for this report.');
+  } else {
+    mappedReport.recommendations.forEach((item, index) => {
+      writePdfLine(doc, `${index + 1}. ${item}`);
+    });
+  }
+
+  writePdfLine(doc, 'Findings Snapshot', { font: 'Helvetica-Bold' });
+  if (!mappedReport.findings.length) {
+    writePdfLine(doc, 'No findings were recorded.');
+  } else {
+    mappedReport.findings.slice(0, 10).forEach((finding, index) => {
+      writePdfLine(doc, `${index + 1}. ${finding.title || 'Untitled finding'} | Severity: ${String(finding.severity || 'unknown').toUpperCase()} | Count: ${Number(finding.count || 0)}`);
+    });
+  }
+}
+
+function getPdfWatermarkConfig() {
+  const configured = String(process.env.REPORT_WATERMARK_TEXT || '').trim();
+  const defaultClassification = String(process.env.REPORT_CLASSIFICATION || 'Confidential').trim();
+
+  if (!configured) {
+    return {
+      source: 'classification',
+      text: null,
+      effectiveFromClassification: true,
+      defaultClassification
+    };
+  }
+
+  if (configured.toLowerCase() === 'none') {
+    return {
+      source: 'disabled',
+      text: configured,
+      effectiveFromClassification: false,
+      defaultClassification
+    };
+  }
+
+  return {
+    source: 'override',
+    text: configured,
+    effectiveFromClassification: false,
+    defaultClassification
+  };
+}
+
+async function fetchReportById(client, reportId, userId) {
+  const fullSelect = 'id, user_id, title, summary, findings, recommendations, source_type, source_value, artifact_path, metadata, created_at';
+  const basicSelect = 'id, user_id, title, summary, findings, recommendations, created_at';
+
+  let query = client
+    .from('reports')
+    .select(fullSelect)
+    .eq('id', reportId);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  let { data, error } = await query.maybeSingle();
+
+  if (error && /schema cache|column/i.test(error.message || '')) {
+    let fallbackQuery = client
+      .from('reports')
+      .select(basicSelect)
+      .eq('id', reportId);
+
+    if (userId) {
+      fallbackQuery = fallbackQuery.eq('user_id', userId);
+    }
+
+    const fallbackResult = await fallbackQuery.maybeSingle();
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
 exports.analyze = async (req, res) => {
   const { text, title } = req.body;
   const client = getSupabaseOrFail(res);
@@ -675,7 +1317,7 @@ exports.analyze = async (req, res) => {
   const iocs = extractIocsFromText(text);
   let iocIntel = enrichIocs(iocs);
   iocIntel = await enrichIocsWithThreatIntel(iocIntel);
-  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel });
+  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel, riskEngine: analysis.riskEngine });
 
   let savedReport;
   try {
@@ -689,6 +1331,7 @@ exports.analyze = async (req, res) => {
       sourceValue: (title || 'Untitled analysis').slice(0, 180),
       metadata: {
         inputLength: text.length,
+        riskEngine: analysis.riskEngine,
         iocs,
         iocIntel,
         mitreAttack
@@ -738,7 +1381,7 @@ exports.scanUrl = async (req, res) => {
   const iocs = extractIocsFromText(url);
   let iocIntel = enrichIocs(iocs);
   iocIntel = await enrichIocsWithThreatIntel(iocIntel);
-  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel });
+  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel, riskEngine: analysis.riskEngine });
 
   let savedReport;
   try {
@@ -758,6 +1401,7 @@ exports.scanUrl = async (req, res) => {
           return null;
         }
         })(),
+        riskEngine: analysis.riskEngine,
         iocs,
         iocIntel,
         mitreAttack
@@ -816,7 +1460,7 @@ exports.uploadAndAnalyze = async (req, res) => {
   const iocs = extractIocsFromText(textForAnalysis);
   let iocIntel = enrichIocs(iocs);
   iocIntel = await enrichIocsWithThreatIntel(iocIntel);
-  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel });
+  const mitreAttack = mapMitreAttack({ findings: analysis.findings, iocIntel, riskEngine: analysis.riskEngine });
   const artifactPath = await storeArtifact(client, req.user?.id || 'anonymous', req.file);
 
   let savedReport;
@@ -835,6 +1479,7 @@ exports.uploadAndAnalyze = async (req, res) => {
         fileType: req.file.mimetype,
         fileSize: req.file.size,
         extractedLength: extractedText.length,
+        riskEngine: analysis.riskEngine,
         iocs,
         iocIntel,
         mitreAttack
@@ -986,4 +1631,127 @@ exports.deleteReport = async (req, res) => {
   }
 
   return res.json({ message: 'Report deleted', id: data.id });
+};
+
+exports.exportReportPdf = async (req, res) => {
+  const client = getSupabaseOrFail(res);
+
+  if (!client) {
+    return;
+  }
+
+  const reportId = String(req.params.id || '').trim();
+  const mode = String(req.query.mode || 'full').trim().toLowerCase() === 'brief' ? 'brief' : 'full';
+  const allowedClassifications = ['confidential', 'internal', 'public'];
+  const requestedClassification = String(req.query.classification || '').trim().toLowerCase();
+  const envClassification = String(process.env.REPORT_CLASSIFICATION || 'Confidential').trim().toLowerCase();
+  const effectiveClassification = allowedClassifications.includes(requestedClassification)
+    ? requestedClassification
+    : (allowedClassifications.includes(envClassification) ? envClassification : 'confidential');
+  const classification = `${effectiveClassification.charAt(0).toUpperCase()}${effectiveClassification.slice(1)}`;
+  const watermarkText = String(process.env.REPORT_WATERMARK_TEXT || classification).trim();
+  if (!reportId) {
+    return res.status(400).json({ message: 'Report id is required' });
+  }
+
+  let report;
+  try {
+    report = await fetchReportById(client, reportId, req.user?.id);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
+  }
+
+  const mappedReport = {
+    id: report.id,
+    userId: report.user_id,
+    title: report.title,
+    summary: report.summary,
+    findings: Array.isArray(report.findings) ? report.findings : [],
+    recommendations: Array.isArray(report.recommendations) ? report.recommendations : [],
+    sourceType: report.source_type || 'text',
+    sourceValue: report.source_value || null,
+    artifactPath: report.artifact_path || null,
+    metadata: report.metadata || {},
+    createdAt: report.created_at
+  };
+
+  const risk = getRiskProfileFromReport(mappedReport);
+  const iocCounts = mappedReport.metadata?.iocIntel?.counts || {};
+  const topMitre = (Array.isArray(mappedReport.metadata?.mitreAttack) ? mappedReport.metadata.mitreAttack : [])
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, 6);
+  const generatedBy = req.user?.name || req.user?.email || 'Analyst';
+  const organizationName = deriveOrganizationName(req.user);
+  const generatedAtLabel = new Date().toLocaleString();
+
+  const filename = `${sanitizeFilename(mappedReport.title)}-${mode === 'brief' ? 'leadership-brief' : 'executive-report'}.pdf`;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  doc.pipe(res);
+
+  const decoratePage = (showHeader) => {
+    drawWatermark(doc, watermarkText);
+    if (showHeader) {
+      drawBrandedHeader(doc, mappedReport.title, mode);
+    }
+    drawFooter(doc, {
+      organizationName,
+      generatedBy,
+      classification,
+      reportId: mappedReport.id,
+      generatedAt: generatedAtLabel
+    });
+  };
+
+  let autoHeaderForNewPages = true;
+  doc.on('pageAdded', () => {
+    decoratePage(autoHeaderForNewPages);
+  });
+
+  if (mode === 'brief') {
+    decoratePage(true);
+    writePdfLine(doc, `Report ID: ${mappedReport.id}`);
+    renderBriefOnePage(doc, mappedReport, risk, iocCounts, topMitre);
+  } else {
+    autoHeaderForNewPages = false;
+    drawWatermark(doc, watermarkText);
+    renderFullReportCoverPage(doc, {
+      organizationName,
+      title: mappedReport.title,
+      riskLabel: `${risk.level}${Number.isFinite(risk.score) ? ` (${risk.score}/100)` : ''}`,
+      classification,
+      generatedBy,
+      createdAtLabel: mappedReport.createdAt ? new Date(mappedReport.createdAt).toLocaleString() : 'Unknown',
+      reportId: mappedReport.id
+    });
+    drawFooter(doc, {
+      organizationName,
+      generatedBy,
+      classification,
+      reportId: mappedReport.id,
+      generatedAt: generatedAtLabel
+    });
+
+    autoHeaderForNewPages = true;
+    doc.addPage();
+    writePdfLine(doc, `Report ID: ${mappedReport.id}`);
+    renderFullExecutiveReport(doc, mappedReport, risk, iocCounts, topMitre);
+  }
+
+  doc.end();
+};
+
+exports.getPdfExportConfig = async (req, res) => {
+  const config = getPdfWatermarkConfig();
+  return res.json({
+    watermark: config,
+    allowedClassifications: ['confidential', 'internal', 'public']
+  });
 };
