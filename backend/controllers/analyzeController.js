@@ -3,6 +3,7 @@ const pdfParse = require('pdf-parse');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const { streamStyledReportPdf } = require('../services/reportPdfGenerator');
 
 const supabase = createSupabaseServiceClient();
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'analysis-artifacts';
@@ -2068,99 +2069,21 @@ exports.exportReportPdf = async (req, res) => {
   console.log(`[PDF Export] Start: reportId=${reportId}, mode=${mode}, filename=${filename}`);
   console.log(`[PDF Export] Risk level: ${risk.level} (${risk.score}), IOC counts: ${JSON.stringify(iocCounts)}, MITRE count: ${topMitre.length}`);
 
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
   try {
-    console.log(`[PDF Export] Creating PDFDocument...`);
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    
-    // Add error event handler for the document
-    doc.on('error', (error) => {
-      console.error('[PDF Export] PDFKit error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ message: `PDF generation error: ${error.message}` });
-      }
+    await streamStyledReportPdf({
+      res,
+      filename,
+      mappedReport,
+      mode,
+      classification,
+      watermarkText,
+      organizationName,
+      generatedBy,
+      generatedAtLabel,
+      risk,
+      iocCounts,
+      topMitre
     });
-
-    // Pipe with error handling
-    console.log(`[PDF Export] Piping document to response...`);
-    doc.pipe(res).on('error', (error) => {
-      console.error('[PDF Export] Response stream error:', error);
-    });
-
-    console.log(`[PDF Export] Setting up page decoration...`);
-    const decoratePage = (showHeader) => {
-      drawWatermark(doc, watermarkText);
-      if (showHeader) {
-        drawBrandedHeader(doc, mappedReport.title, mode);
-      }
-      drawFooter(doc, {
-        organizationName,
-        generatedBy,
-        classification,
-        reportId: mappedReport.id,
-        generatedAt: generatedAtLabel
-      });
-    };
-
-    let autoHeaderForNewPages = true;
-    let isProcessingPageAdd = false;
-    doc.on('pageAdded', () => {
-      if (isProcessingPageAdd) {
-        console.log(`[PDF Export] Skipping nested pageAdded event (recursion prevention)`);
-        return;
-      }
-      isProcessingPageAdd = true;
-      try {
-        console.log(`[PDF Export] Page added, showing header: ${autoHeaderForNewPages}`);
-        decoratePage(autoHeaderForNewPages);
-      } finally {
-        isProcessingPageAdd = false;
-      }
-    });
-
-    if (mode === 'brief') {
-      console.log(`[PDF Export] Rendering brief mode (one-page)...`);
-      decoratePage(true);
-      writePdfLine(doc, `Report ID: ${mappedReport.id}`);
-      console.log(`[PDF Export] Calling renderBriefOnePage...`);
-      renderBriefOnePage(doc, mappedReport, risk, iocCounts, topMitre);
-      console.log(`[PDF Export] renderBriefOnePage completed`);
-    } else {
-      console.log(`[PDF Export] Rendering full mode (multi-page)...`);
-      autoHeaderForNewPages = false;
-      drawWatermark(doc, watermarkText);
-      console.log(`[PDF Export] Calling renderFullReportCoverPage...`);
-      renderFullReportCoverPage(doc, {
-        organizationName,
-        title: mappedReport.title,
-        riskLabel: `${risk.level}${Number.isFinite(risk.score) ? ` (${risk.score}/100)` : ''}`,
-        classification,
-        generatedBy,
-        createdAtLabel: mappedReport.createdAt ? new Date(mappedReport.createdAt).toLocaleString() : 'Unknown',
-        reportId: mappedReport.id
-      });
-      console.log(`[PDF Export] renderFullReportCoverPage completed`);
-      drawFooter(doc, {
-        organizationName,
-        generatedBy,
-        classification,
-        reportId: mappedReport.id,
-        generatedAt: generatedAtLabel
-      });
-
-      autoHeaderForNewPages = true;
-      doc.addPage();
-      writePdfLine(doc, `Report ID: ${mappedReport.id}`);
-      console.log(`[PDF Export] Calling renderFullExecutiveReport...`);
-      renderFullExecutiveReport(doc, mappedReport, risk, iocCounts, topMitre);
-      console.log(`[PDF Export] renderFullExecutiveReport completed`);
-    }
-
-    console.log(`[PDF Export] Ending document...`);
-    doc.end();
-    console.log(`[PDF Export] Document.end() called`);
   } catch (error) {
     console.error('[PDF Export] Caught error:', error);
     if (!res.headersSent) {
