@@ -331,6 +331,7 @@ select:focus {
 .list {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .list-item {
@@ -338,6 +339,13 @@ select:focus {
   border-radius: 18px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.list-item > * {
+  min-width: 0;
 }
 
 .split {
